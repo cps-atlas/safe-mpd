@@ -1,0 +1,28 @@
+
+services:
+  jax-dev:
+    build: .
+    image: jax-dev:latest
+    container_name: jax_dev
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - DISPLAY=${DISPLAY}
+      - XAUTHORITY=/tmp/.docker.xauth
+      - QT_X11_NO_MITSHM=1
+    volumes:
+      - .:/workspace
+      - /tmp/.X11-unix:/tmp/.X11-unix
+      - ${HOME}/.Xauthority:/tmp/.docker.xauth
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - capabilities: [gpu]
+    network_mode: host
+    shm_size: '8gb'
+    ipc: host
+    ulimits:
+      memlock: -1
+      stack: 67108864
+    command: tail -f /dev/null
