@@ -34,7 +34,7 @@ def check_collision(x, obs_center, obs_radius):
 
 @struct.dataclass
 class State:
-    pipeline_state: jnp.ndarray
+    pipeline_state: jnp.ndarray  # NOTE: just the state, pipeline is a term from Brax.
     obs: jnp.ndarray
     reward: jnp.ndarray
     done: jnp.ndarray
@@ -80,7 +80,7 @@ class Car2d:
         action = jnp.clip(action, -1.0, 1.0)
         q = state.pipeline_state
         q_new = rk4(car_dynamics, state.pipeline_state, action, self.dt)
-        collide = check_collision(q_new, self.obs_center, self.obs_radius)
+        collide = check_collision(q_new, self.obs_center, self.obs_radius) # NOTE: if collision, then just don't update the state.
         q = jnp.where(collide, q, q_new)
         reward = self.get_reward(q)
         return state.replace(pipeline_state=q, obs=q, reward=reward, done=0.0)

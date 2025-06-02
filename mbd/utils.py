@@ -16,9 +16,8 @@ def rollout_us(step_env, state, us):
         state = step_env(state, u)
         return state, (state.reward, state.pipeline_state)
 
-    _, (rews, pipline_states) = jax.lax.scan(step, state, us)
+    _, (rews, pipline_states) = jax.lax.scan(step, state, us) # NOTE: returns stack of (rew, pipline_state). _ is the final carry, which is final state in this case
     return rews, pipline_states
-
 
 def render_us(step_env, sys, state, us):
     rollout = []

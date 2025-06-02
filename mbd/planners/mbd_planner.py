@@ -23,7 +23,7 @@ class Args:
     not_render: bool = False
     # env
     env_name: str = (
-        "ant"  # "humanoidstandup", "ant", "halfcheetah", "hopper", "walker2d", "car2d"
+        "car2d"  # "humanoidstandup", "ant", "halfcheetah", "hopper", "walker2d", "car2d"
     )
     # diffusion
     Nsample: int = 2048  # number of samples
@@ -32,7 +32,7 @@ class Args:
     temp_sample: float = 0.1  # temperature for sampling
     beta0: float = 1e-4  # initial beta
     betaT: float = 1e-2  # final beta
-    enable_demo: bool = False
+    enable_demo: bool = True
 
 
 def run_diffusion(args: Args):
@@ -42,31 +42,31 @@ def run_diffusion(args: Args):
     ## setup env
 
     # recommended temperature for envs
-    temp_recommend = {
-        "ant": 0.1,
-        "halfcheetah": 0.4,
-        "hopper": 0.1,
-        "humanoidstandup": 0.1,
-        "humanoidrun": 0.1,
-        "walker2d": 0.1,
-        "pushT": 0.2,
-    }
-    Ndiffuse_recommend = {
-        "pushT": 200,
-        "humanoidrun": 300,
-    }
-    Nsample_recommend = {
-        "humanoidrun": 8192,
-    }
-    Hsample_recommend = {
-        "pushT": 40,
-    }
-    if not args.disable_recommended_params:
-        args.temp_sample = temp_recommend.get(args.env_name, args.temp_sample)
-        args.Ndiffuse = Ndiffuse_recommend.get(args.env_name, args.Ndiffuse)
-        args.Nsample = Nsample_recommend.get(args.env_name, args.Nsample)
-        args.Hsample = Hsample_recommend.get(args.env_name, args.Hsample)
-        print(f"override temp_sample to {args.temp_sample}")
+    # temp_recommend = {
+    #     "ant": 0.1,
+    #     "halfcheetah": 0.4,
+    #     "hopper": 0.1,
+    #     "humanoidstandup": 0.1,
+    #     "humanoidrun": 0.1,
+    #     "walker2d": 0.1,
+    #     "pushT": 0.2,
+    # }
+    # Ndiffuse_recommend = {
+    #     "pushT": 200,
+    #     "humanoidrun": 300,
+    # }
+    # Nsample_recommend = {
+    #     "humanoidrun": 8192,
+    # }
+    # Hsample_recommend = {
+    #     "pushT": 40,
+    # }
+    # if not args.disable_recommended_params:
+    #     args.temp_sample = temp_recommend.get(args.env_name, args.temp_sample)
+    #     args.Ndiffuse = Ndiffuse_recommend.get(args.env_name, args.Ndiffuse)
+    #     args.Nsample = Nsample_recommend.get(args.env_name, args.Nsample)
+    #     args.Hsample = Hsample_recommend.get(args.env_name, args.Hsample)
+    #     print(f"override temp_sample to {args.temp_sample}")
     env = mbd.envs.get_env(args.env_name)
     Nx = env.observation_size
     Nu = env.action_size
@@ -77,7 +77,7 @@ def run_diffusion(args: Args):
     rollout_us = jax.jit(functools.partial(mbd.utils.rollout_us, step_env_jit))
 
     rng, rng_reset = jax.random.split(rng)  # NOTE: rng_reset should never be changed.
-    state_init = reset_env_jit(rng_reset)
+    state_init = reset_env_jit(rng_reset) # NOTE: in car2d, just reset with pre-defined x0. currently no randomization.
 
     ## run diffusion
     start_time = time.time()
