@@ -48,7 +48,7 @@ To run model-based diffusion combined with demonstrations, run the following com
 
 ```bash
 cd mbd/planners
-python mbd_planner.py --env_name $ENV_NAME --enable_demos
+python mbd_planner.py --env_name $ENV_NAME --enable_demo
 ```
 
 Currently, only the `humanoidtrack`, `car2d` support demonstrations.
@@ -68,15 +68,6 @@ python vis_diffusion.py --env_name $ENV_NAME
 ```
 
 Please make sure you have run the planner first to generate the data.
-
-### Model-based Diffusion for Black-box Optimization
-
-To run model-based diffusion for black-box optimization, run the following command:
-
-```bash
-cd mbd/blackbox
-python mbd_opt.py
-```
 
 ### Other Baselines
 

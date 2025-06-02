@@ -1,4 +1,3 @@
-
 services:
   jax-dev:
     build: .
@@ -25,4 +24,5 @@ services:
     ulimits:
       memlock: -1
       stack: 67108864
-    command: tail -f /dev/null
+    command: >
+      bash -c "pip install -e . --break-system-packages && tail -f /dev/null"
