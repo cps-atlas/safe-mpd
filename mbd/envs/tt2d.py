@@ -3,6 +3,8 @@ from jax import numpy as jnp
 from flax import struct
 from functools import partial
 import matplotlib.pyplot as plt
+import numpy as np
+from matplotlib.transforms import Affine2D
 
 import mbd
 
@@ -38,7 +40,7 @@ class TractorTrailer2d:
     Input constraint: v ∈ [-1, 1], delta ∈ [-55°, 55°]
     """
     def __init__(self):
-        self.dt = 0.1
+        self.dt = 0.2
         self.H = 50
         
         # Tractor-trailer parameters
@@ -49,11 +51,11 @@ class TractorTrailer2d:
         self.trailer_width = 2.5
         
         # Input constraints
-        self.v_max = 2.0  # velocity limit
+        self.v_max = 3.0  # velocity limit
         self.delta_max = 75.0 * jnp.pi / 180.0  # steering angle limit in radians
         
         # Obstacles
-        r_obs = 0.3
+        r_obs = 0.3 * 6
         self.obs_center = jnp.array(
             [
                 [-r_obs * 3, r_obs * 2],
@@ -72,8 +74,8 @@ class TractorTrailer2d:
         self.obs_radius = r_obs  # Radius of the obstacle
         
         # Initial and goal states: [px, py, theta1, theta2]
-        self.x0 = jnp.array([-0.5, 0.0, 0.0, 0.0])
-        self.xg = jnp.array([0.5, 0.0, 0.0, 0.0])
+        self.x0 = jnp.array([-0.5*6, 0.0, 0.0, 0.0])
+        self.xg = jnp.array([0.5*6, 0.0, 0.0, 0.0])
         
         # Load and process reference trajectory
         xref_original = jnp.load(f"{mbd.__path__[0]}/assets/car2d_xref.npy")
@@ -88,6 +90,9 @@ class TractorTrailer2d:
         xref_2d = jnp.array(xref_interp)
         
         xref_2d = xref_original # TODO: use the original trajectory for now.
+        print(f"xref_2d: {xref_2d}")
+        xref_2d = xref_2d * 6
+        print(f"xref_2d: {xref_2d}")
         
         # Extend 2D reference to 4D state space [px, py, theta1, theta2]
         xref_diff = jnp.diff(xref_2d, axis=0)
@@ -102,6 +107,13 @@ class TractorTrailer2d:
         
         print(f"Reference trajectory shape: {self.xref.shape}")
         self.rew_xref = jax.vmap(self.get_reward)(self.xref).mean()
+
+        # Animation-related attributes
+        self.tractor_body = None
+        self.trailer_body = None
+        self.tractor_wheels = []
+        self.trailer_wheels = []
+        self.hitch_line = None
 
     def reset(self, rng: jax.Array):
         """Resets the environment to an initial state."""
@@ -163,8 +175,10 @@ class TractorTrailer2d:
     @partial(jax.jit, static_argnums=(0,))
     def get_reward(self, q):
         """Reward based on distance to goal position"""
+        # Scale reward threshold with environment size (was 0.2 for original scale)
+        reward_threshold = 1.2  # 0.2 * 6 to match the 6x scaled environment # TODO: it was 0.2, and need to put it in init
         reward = (
-            1.0 - (jnp.clip(jnp.linalg.norm(q[:2] - self.xg[:2]), 0.0, 0.2) / 0.2) ** 2
+            1.0 - (jnp.clip(jnp.linalg.norm(q[:2] - self.xg[:2]), 0.0, reward_threshold) / reward_threshold) ** 2
         )
         return reward
 
@@ -172,8 +186,10 @@ class TractorTrailer2d:
     def eval_xref_logpd(self, xs):
         """Evaluate log probability density with respect to reference trajectory"""
         xs_err = xs[:, :2] - self.xref[:, :2]
+        # Scale reference threshold with environment size (was 0.5 for original scale)
+        ref_threshold = 3.0  # 0.5 * 6 to match the 6x scaled environment # TODO: it was 0.5, and need to put it in init
         logpd = 0.0-(
-            (jnp.clip(jnp.linalg.norm(xs_err, axis=-1), 0.0, 0.5) / 0.5) ** 2
+            (jnp.clip(jnp.linalg.norm(xs_err, axis=-1), 0.0, ref_threshold) / ref_threshold) ** 2
         ).mean(axis=-1)
         return logpd # NOTE: unnormalized logpd, log p_demo(Y0) in the paper.
 
@@ -212,8 +228,156 @@ class TractorTrailer2d:
         
         ax.set_xlabel("x")
         ax.set_ylabel("y")
-        ax.set_xlim(-2, 2)
-        ax.set_ylim(-2, 2)
+        ax.set_xlim(-3*6, 3*6)
+        ax.set_ylim(-3*6, 3*6)
         ax.set_aspect("equal")
-        ax.grid(True)
+        #ax.grid(True)
         # ax.set_title("Tractor-Trailer 2D")
+
+    def setup_animation_patches(self, ax, tractor_color='blue', trailer_color='red'):
+        """Initialize the patches for tractor-trailer visualization"""
+        
+        # Tractor body (rectangle)
+        self.tractor_body = ax.add_patch(
+            plt.Rectangle((-self.l1/2, -self.tractor_width/2),
+                         self.l1, self.tractor_width,
+                         linewidth=2, edgecolor='black', facecolor=tractor_color, alpha=0.7)
+        )
+        
+        # Trailer body (rectangle)
+        self.trailer_body = ax.add_patch(
+            plt.Rectangle((-self.l2/2, -self.trailer_width/2),
+                         self.l2, self.trailer_width,
+                         linewidth=2, edgecolor='black', facecolor=trailer_color, alpha=0.7)
+        )
+        
+        # Wheels
+        wheel_width = 0.3
+        wheel_length = 0.15
+        
+        # Tractor wheels (front and rear)
+        for i in range(2):
+            wheel = ax.add_patch(
+                plt.Rectangle((-wheel_length/2, -wheel_width/2),
+                             wheel_length, wheel_width,
+                             edgecolor='black', facecolor='gray', alpha=0.9)
+            )
+            self.tractor_wheels.append(wheel)
+        
+        # Trailer wheels
+        for i in range(2):
+            wheel = ax.add_patch(
+                plt.Rectangle((-wheel_length/2, -wheel_width/2),
+                             wheel_length, wheel_width,
+                             edgecolor='black', facecolor='gray', alpha=0.9)
+            )
+            self.trailer_wheels.append(wheel)
+        
+        # Hitch connection line
+        self.hitch_line, = ax.plot([], [], 'k-', linewidth=3, alpha=0.8)
+
+    def get_tractor_trailer_positions(self, x):
+        """Calculate tractor and trailer positions and orientations"""
+        px, py, theta1, theta2 = x
+        
+        # Tractor position (rear axle center)
+        tractor_rear_x = px
+        tractor_rear_y = py
+        
+        # Tractor front axle
+        tractor_front_x = px + self.l1 * np.cos(theta1)
+        tractor_front_y = py + self.l1 * np.sin(theta1)
+        
+        # Hitch point (at rear of tractor)
+        hitch_x = px - self.lh * np.cos(theta1)
+        hitch_y = py - self.lh * np.sin(theta1)
+        
+        # Trailer rear axle (at hitch + trailer length)
+        trailer_rear_x = hitch_x - self.l2 * np.cos(theta2)
+        trailer_rear_y = hitch_y - self.l2 * np.sin(theta2)
+        
+        # Trailer front (at hitch point)
+        trailer_front_x = hitch_x
+        trailer_front_y = hitch_y
+        
+        return {
+            'tractor_rear': (tractor_rear_x, tractor_rear_y),
+            'tractor_front': (tractor_front_x, tractor_front_y),
+            'trailer_rear': (trailer_rear_x, trailer_rear_y),
+            'trailer_front': (trailer_front_x, trailer_front_y),
+            'hitch': (hitch_x, hitch_y),
+            'theta1': theta1,
+            'theta2': theta2
+        }
+
+    def render_rigid_body(self, x, u=None):
+        """Return the transforms to render the tractor-trailer system"""
+        px, py, theta1, theta2 = x
+        
+        # Get positions
+        positions = self.get_tractor_trailer_positions(x)
+        
+        # Tractor body transform (centered at tractor center)
+        tractor_center_x = px + (self.l1/2) * np.cos(theta1)
+        tractor_center_y = py + (self.l1/2) * np.sin(theta1)
+        transform_tractor_body = (Affine2D()
+                                 .rotate(theta1)
+                                 .translate(tractor_center_x, tractor_center_y) + plt.gca().transData)
+        
+        # Trailer body transform (centered at trailer center)
+        trailer_center_x = positions['hitch'][0] - (self.l2/2) * np.cos(theta2)
+        trailer_center_y = positions['hitch'][1] - (self.l2/2) * np.sin(theta2)
+        transform_trailer_body = (Affine2D()
+                                 .rotate(theta2)
+                                 .translate(trailer_center_x, trailer_center_y) + plt.gca().transData)
+        
+        # Wheel transforms
+        transforms_tractor_wheels = []
+        # Tractor rear wheel
+        transforms_tractor_wheels.append(
+            Affine2D().rotate(theta1).translate(*positions['tractor_rear']) + plt.gca().transData
+        )
+        # Tractor front wheel (with steering angle if u is provided)
+        steering_angle = 0.0
+        if u is not None:
+            v, delta = u
+            steering_angle = delta
+        transforms_tractor_wheels.append(
+            Affine2D().rotate(theta1 + steering_angle).translate(*positions['tractor_front']) + plt.gca().transData
+        )
+        
+        transforms_trailer_wheels = []
+        # Trailer wheels
+        transforms_trailer_wheels.append(
+            Affine2D().rotate(theta2).translate(*positions['trailer_rear']) + plt.gca().transData
+        )
+        transforms_trailer_wheels.append(
+            Affine2D().rotate(theta2).translate(*positions['trailer_front']) + plt.gca().transData
+        )
+        
+        return {
+            'tractor_body': transform_tractor_body,
+            'trailer_body': transform_trailer_body,
+            'tractor_wheels': transforms_tractor_wheels,
+            'trailer_wheels': transforms_trailer_wheels,
+            'hitch_line_data': (positions['tractor_rear'], positions['hitch'])
+        }
+
+    def update_animation_patches(self, x, u=None):
+        """Update all patches with new state"""
+        transforms = self.render_rigid_body(x, u)
+        
+        # Update body transforms
+        self.tractor_body.set_transform(transforms['tractor_body'])
+        self.trailer_body.set_transform(transforms['trailer_body'])
+        
+        # Update wheel transforms
+        for i, wheel in enumerate(self.tractor_wheels):
+            wheel.set_transform(transforms['tractor_wheels'][i])
+        for i, wheel in enumerate(self.trailer_wheels):
+            wheel.set_transform(transforms['trailer_wheels'][i])
+        
+        # Update hitch line
+        hitch_data = transforms['hitch_line_data']
+        self.hitch_line.set_data([hitch_data[0][0], hitch_data[1][0]], 
+                                [hitch_data[0][1], hitch_data[1][1]])
