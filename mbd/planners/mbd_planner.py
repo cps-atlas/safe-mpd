@@ -23,12 +23,12 @@ class Args:
     not_render: bool = False
     # env
     env_name: str = (
-        "car2d"  # "humanoidstandup", "ant", "halfcheetah", "hopper", "walker2d", "car2d"
+        "tt2d"  # "humanoidstandup", "ant", "halfcheetah", "hopper", "walker2d", "car2d"
     )
     # diffusion
     Nsample: int = 2048  # number of samples
-    Hsample: int = 99  # horizon
-    Ndiffuse: int = 100  # number of diffusion steps
+    Hsample: int = 50  # horizon
+    Ndiffuse: int = 200  # number of diffusion steps
     temp_sample: float = 0.1  # temperature for sampling
     beta0: float = 1e-4  # initial beta
     betaT: float = 1e-2  # final beta
