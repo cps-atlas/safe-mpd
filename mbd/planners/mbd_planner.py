@@ -48,27 +48,45 @@ def setup_animation_saving(env_name):
     animation_path = f"{mbd.__path__[0]}/../results/{env_name}/animations"
     if not os.path.exists(animation_path):
         os.makedirs(animation_path)
+    # if file exists, delete all
+    if os.path.exists(animation_path):
+        for file_name in glob.glob(f"{animation_path}/*.png"):
+            os.remove(file_name)
     return animation_path
 
 
 def export_video(env_name):
     """Convert image sequence to video using ffmpeg"""
-    current_directory_path = os.getcwd()
-    animation_path = f"{current_directory_path}/results/{env_name}/animations"
+    # Use the same path structure as setup_animation_saving
+    animation_path = f"{mbd.__path__[0]}/../results/{env_name}/animations"
+    
+    # Debug: Check if frames exist
+    frame_files = glob.glob(f"{animation_path}/frame_*.png")
+    print(f"Animation path: {animation_path}")
+    print(f"Found {len(frame_files)} frame files")
+    if len(frame_files) > 0:
+        print(f"First frame: {frame_files[0]}")
+        print(f"Last frame: {frame_files[-1]}")
+    else:
+        print("ERROR: No frame files found!")
+        return
     
     # Create video using ffmpeg
-    subprocess.call(['ffmpeg', '-y',  # -y to overwrite existing files
+    result = subprocess.call(['ffmpeg', '-y',  # -y to overwrite existing files
                      '-framerate', '10',  # Input framerate
                      '-i', f'{animation_path}/frame_%04d.png',
                      '-vf', 'scale=1920:1080,fps=30',  # Scale and set output framerate
                      '-pix_fmt', 'yuv420p',
                      f'{animation_path}/tractor_trailer_animation.mp4'])
     
-    # Clean up individual frames
-    for file_name in glob.glob(f"{animation_path}/*.png"):
-        os.remove(file_name)
-    
-    print(f"Animation saved to: {animation_path}/tractor_trailer_animation.mp4")
+    if result == 0:
+        print("Video created successfully!")
+        # Clean up individual frames
+        for file_name in glob.glob(f"{animation_path}/*.png"):
+            os.remove(file_name)
+        print(f"Animation saved to: {animation_path}/tractor_trailer_animation.mp4")
+    else:
+        print(f"FFmpeg failed with return code: {result}")
 
 
 def create_animation(env, trajectory_states, trajectory_actions, args):

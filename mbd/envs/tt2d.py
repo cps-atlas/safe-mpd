@@ -74,8 +74,8 @@ class TractorTrailer2d:
         self.obs_radius = r_obs  # Radius of the obstacle
         
         # Initial and goal states: [px, py, theta1, theta2]
-        self.x0 = jnp.array([-0.5*6, 0.0, 0.0, 0.0])
-        self.xg = jnp.array([0.5*6, 0.0, 0.0, 0.0])
+        self.x0 = jnp.array([-0.5*6, 0.0, jnp.pi, jnp.pi])
+        self.xg = jnp.array([0.5*6, 0.0, jnp.pi, jnp.pi])
         
         # Load and process reference trajectory
         xref_original = jnp.load(f"{mbd.__path__[0]}/assets/car2d_xref.npy")
