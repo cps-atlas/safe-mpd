@@ -4,6 +4,7 @@ FROM nvcr.io/nvidia/cuda-dl-base:25.03-cuda12.8-devel-ubuntu24.04
 RUN apt-get update && apt-get install -y \
     python3-pip \
     python3-dev \
+    python3-tk \
     git \
     wget \
     nano \
