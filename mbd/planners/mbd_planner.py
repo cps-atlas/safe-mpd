@@ -27,7 +27,7 @@ class Args:
     )
     # diffusion
     Nsample: int = 2048  # number of samples
-    Hsample: int = 50  # horizon
+    Hsample: int = 99  # horizon
     Ndiffuse: int = 100  # number of diffusion steps
     temp_sample: float = 0.1  # temperature for sampling
     beta0: float = 1e-4  # initial beta
@@ -38,50 +38,22 @@ class Args:
 def run_diffusion(args: Args):
 
     rng = jax.random.PRNGKey(seed=args.seed)
-
-    ## setup env
-
-    # recommended temperature for envs
-    # temp_recommend = {
-    #     "ant": 0.1,
-    #     "halfcheetah": 0.4,
-    #     "hopper": 0.1,
-    #     "humanoidstandup": 0.1,
-    #     "humanoidrun": 0.1,
-    #     "walker2d": 0.1,
-    #     "pushT": 0.2,
-    # }
-    # Ndiffuse_recommend = {
-    #     "pushT": 200,
-    #     "humanoidrun": 300,
-    # }
-    # Nsample_recommend = {
-    #     "humanoidrun": 8192,
-    # }
-    # Hsample_recommend = {
-    #     "pushT": 40,
-    # }
-    # if not args.disable_recommended_params:
-    #     args.temp_sample = temp_recommend.get(args.env_name, args.temp_sample)
-    #     args.Ndiffuse = Ndiffuse_recommend.get(args.env_name, args.Ndiffuse)
-    #     args.Nsample = Nsample_recommend.get(args.env_name, args.Nsample)
-    #     args.Hsample = Hsample_recommend.get(args.env_name, args.Hsample)
-    #     print(f"override temp_sample to {args.temp_sample}")
     env = mbd.envs.get_env(args.env_name)
     Nx = env.observation_size
     Nu = env.action_size
+    
     # env functions
     step_env_jit = jax.jit(env.step)
     reset_env_jit = jax.jit(env.reset)
     # eval_us = jax.jit(functools.partial(mbd.utils.eval_us, step_env_jit))
     rollout_us = jax.jit(functools.partial(mbd.utils.rollout_us, step_env_jit))
 
+    # NOTE: a, b = jax.random.split(b) is a standard way to use random. always use a as random variable, not b. 
     rng, rng_reset = jax.random.split(rng)  # NOTE: rng_reset should never be changed.
     state_init = reset_env_jit(rng_reset) # NOTE: in car2d, just reset with pre-defined x0. currently no randomization.
 
     ## run diffusion
     start_time = time.time()
-    
 
     betas = jnp.linspace(args.beta0, args.betaT, args.Ndiffuse)
     alphas = 1.0 - betas
@@ -103,15 +75,15 @@ def run_diffusion(args: Args):
 
         # sample from q_i
         rng, Y0s_rng = jax.random.split(rng)
-        eps_u = jax.random.normal(Y0s_rng, (args.Nsample, args.Hsample, Nu))
+        eps_u = jax.random.normal(Y0s_rng, (args.Nsample, args.Hsample, Nu)) # NOTE: Sample from N(0, I) 
         Y0s = eps_u * sigmas[i] + Ybar_i
-        Y0s = jnp.clip(Y0s, -1.0, 1.0)
+        Y0s = jnp.clip(Y0s, -1.0, 1.0) # NOTE: clip action to [-1, 1] (it is defined in dynamics)
 
         # esitimate mu_0tm1
         rewss, qs = jax.vmap(rollout_us, in_axes=(None, 0))(state_init, Y0s)
         rews = rewss.mean(axis=-1)
-        rew_std = rews.std()
-        rew_std = jnp.where(rew_std < 1e-4, 1.0, rew_std)
+        rew_std = rews.std() # NOTE: scalar
+        rew_std = jnp.where(rew_std < 1e-4, 1.0, rew_std) # NOTE: at early stage it is near 0, and increase to 0.1 ish after.
         rew_mean = rews.mean()
         logp0 = (rews - rew_mean) / rew_std / args.temp_sample
 
@@ -143,14 +115,14 @@ def run_diffusion(args: Args):
         with tqdm(range(args.Ndiffuse - 1, 0, -1), desc="Diffusing") as pbar:
             for i in pbar:
                 carry_once = (i, rng, Yi)
-                (i, rng, Yi), rew = reverse_once(carry_once, None)
+                (i, rng, Yi), rew = reverse_once(carry_once, None) # NOTE: just to maintain similar style with scan, here no xs. 
                 Ybars.append(Yi)
                 # Update the progress bar's suffix to show the current reward
                 pbar.set_postfix({"rew": f"{rew:.2e}"})
         return jnp.array(Ybars)
 
     rng_exp, rng = jax.random.split(rng)
-    Yi = reverse(YN, rng_exp)
+    Yi = reverse(YN, rng_exp) # NOTE: YN: all zeros, one trajectory of actions 
     end_time = time.time()
     print(f"Time taken: {end_time - start_time:.2f} seconds")
     
@@ -159,28 +131,23 @@ def run_diffusion(args: Args):
         if not os.path.exists(path):
             os.makedirs(path)
         jnp.save(f"{path}/mu_0ts.npy", Yi)
-        if args.env_name == "car2d":
-            fig, ax = plt.subplots(1, 1, figsize=(3, 3))
-            # rollout
-            xs = jnp.array([state_init.pipeline_state])
-            state = state_init
-            for t in range(Yi.shape[1]):
-                state = step_env_jit(state, Yi[-1, t])
-                xs = jnp.concatenate([xs, state.pipeline_state[None]], axis=0)
-            env.render(ax, xs)
-            if args.enable_demo:
-                ax.plot(env.xref[:, 0], env.xref[:, 1], "g--", label="RRT path")
-            ax.legend()
-            plt.savefig(f"{path}/rollout.png")
-        else:
-            render_us = functools.partial(
-                mbd.utils.render_us,
-                step_env_jit,
-                env.sys.tree_replace({"opt.timestep": env.dt}),
-            )
-            webpage = render_us(state_init, Yi[-1])
-            with open(f"{path}/rollout.html", "w") as f:
-                f.write(webpage)
+        
+        #if args.env_name == "car2d":
+        fig, ax = plt.subplots(1, 1, figsize=(3, 3))
+        # rollout
+        xs = jnp.array([state_init.pipeline_state])
+        state = state_init
+        for t in range(Yi.shape[1]):
+            state = step_env_jit(state, Yi[-1, t]) # NOTE: Yi[-1, :] is the action at the last denoised step. 
+            xs = jnp.concatenate([xs, state.pipeline_state[None]], axis=0)
+        env.render(ax, xs)
+        if args.enable_demo:
+            ax.plot(env.xref[:, 0], env.xref[:, 1], "g--", label="RRT path")
+        ax.legend()
+        plt.switch_backend('TkAgg')  # Switch to interactive backend
+        plt.show()
+        plt.savefig(f"{path}/rollout.png")
+
     rewss_final, _ = rollout_us(state_init, Yi[-1])
     rew_final = rewss_final.mean()
 

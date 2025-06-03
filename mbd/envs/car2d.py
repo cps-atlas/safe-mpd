@@ -6,14 +6,20 @@ import matplotlib.pyplot as plt
 
 import mbd
 
+"""
+State: [x, y, theta]
+Action: [theta_dot, v]
+Input constraint: [[-3, 3], [-2*pi/3, 2*pi/3]], but both are noramlized to [-1, 1]
+
+"""
 
 def car_dynamics(x, u):
     # x = x.at[3].set(jnp.clip(x[3], -2.0, 2.0))
     return jnp.array(
         [
-            u[1] * jnp.sin(x[2])*3.0,  # x_dot
-            u[1] * jnp.cos(x[2])*3.0,  # y_dot
-            u[0] * jnp.pi / 3 * 2.0,  # theta_dot
+            u[1] * jnp.sin(x[2])*1.0,  # x_dot
+            u[1] * jnp.cos(x[2])*1.0,  # y_dot
+            u[0] * jnp.pi / 8 * 2.0,  # theta_dot
             # u[1] * 6.0,  # v_dot
         ]
     )
@@ -43,7 +49,7 @@ class State:
 class Car2d:
     def __init__(self):
         self.dt = 0.1
-        self.H = 50
+        self.H = 99
         r_obs = 0.3
         self.obs_center = jnp.array(
             [
@@ -64,6 +70,17 @@ class Car2d:
         self.x0 = jnp.array([-0.5, 0.0, jnp.pi*3/2])
         self.xg = jnp.array([0.5, 0.0, 0.0])
         self.xref = jnp.load(f"{mbd.__path__[0]}/assets/car2d_xref.npy")
+
+        # interpolate each two points in xref to make it 100 points
+        # Interpolate xref to get 100 points by averaging consecutive points
+        xref_interp = []
+        for i in range(self.xref.shape[0]-1):
+            xref_interp.append(self.xref[i,:])
+            xref_interp.append((self.xref[i,:] + self.xref[i+1,:])/2)
+        xref_interp.append(self.xref[-1,:])
+        self.xref = jnp.array(xref_interp)
+        print(self.xref.shape)
+        
         # self.xref = jnp.load(f"{mbd.__path__[0]}/../figure/car2d_xref.npy")
         xref_diff = jnp.diff(self.xref, axis=0)
         theta = jnp.arctan2(xref_diff[:, 0], xref_diff[:, 1])
@@ -99,7 +116,7 @@ class Car2d:
         logpd = 0.0-(
             (jnp.clip(jnp.linalg.norm(xs_err, axis=-1), 0.0, 0.5) / 0.5) ** 2
         ).mean(axis=-1)
-        return logpd
+        return logpd # NOTE: unnormalized logpd, log p_demo(Y0) in the paper.
 
     @property
     def action_size(self):
