@@ -7,6 +7,7 @@ import numpy as np
 from matplotlib.transforms import Affine2D
 
 import mbd
+from .env import Env
 
 """
 Created on June 3rd, 2025
@@ -39,7 +40,8 @@ class TractorTrailer2d:
     Action: [v, delta] - velocity and steering angle
     Input constraint: v ∈ [-1, 1], delta ∈ [-55°, 55°]
     """
-    def __init__(self):
+    def __init__(self, x0=None, xg=None, env_config=None):
+        # Time parameters
         self.dt = 0.2
         self.H = 50
         
@@ -54,28 +56,22 @@ class TractorTrailer2d:
         self.v_max = 3.0  # velocity limit
         self.delta_max = 75.0 * jnp.pi / 180.0  # steering angle limit in radians
         
-        # Obstacles
-        r_obs = 0.3 * 6
-        self.obs_center = jnp.array(
-            [
-                [-r_obs * 3, r_obs * 2],
-                [-r_obs * 2, r_obs * 2],
-                [-r_obs * 1, r_obs * 2],
-                [0.0, r_obs * 2],
-                [0.0, r_obs * 1],
-                [0.0, 0.0],
-                [0.0, -r_obs * 1],
-                [-r_obs * 3, -r_obs * 2],
-                [-r_obs * 2, -r_obs * 2],
-                [-r_obs * 1, -r_obs * 2],
-                [0.0, -r_obs * 2],
-            ]
-        )
-        self.obs_radius = r_obs  # Radius of the obstacle
+        # Reward and reference thresholds (hyperparameters)
+        self.reward_threshold = 1.2  # was 0.2 for original scale, scaled by 6x
+        self.ref_threshold = 3.0     # was 0.5 for original scale, scaled by 6x
+        
+        # Environment setup
+        if env_config is None:
+            self.env = Env()
+        else:
+            self.env = env_config
+        
+        # Get obstacles from environment
+        self.obs = self.env.get_obstacles()
         
         # Initial and goal states: [px, py, theta1, theta2]
-        self.x0 = jnp.array([-0.5*6, 0.0, jnp.pi, jnp.pi])
-        self.xg = jnp.array([0.5*6, 0.0, jnp.pi, jnp.pi])
+        self.x0 = self.set_initial_pos()
+        self.xg = self.set_goal_pos()
         
         # Load and process reference trajectory
         xref_original = jnp.load(f"{mbd.__path__[0]}/assets/car2d_xref.npy")
@@ -114,6 +110,14 @@ class TractorTrailer2d:
         self.tractor_wheels = []
         self.trailer_wheels = []
         self.hitch_line = None
+        
+    def set_initial_pos(self, x=-3.0, y=0.0, theta1=np.pi, theta2=np.pi):
+        """Set initial position for tractor-trailer"""
+        return jnp.array([x, y, theta1, theta2])
+
+    def set_goal_pos(self, x=3.0, y=0.0, theta1=np.pi, theta2=np.pi):
+        """Set goal position for tractor-trailer"""
+        return jnp.array([x, y, theta1, theta2]) 
 
     def reset(self, rng: jax.Array):
         """Resets the environment to an initial state."""
@@ -148,10 +152,10 @@ class TractorTrailer2d:
         return jnp.array([px_dot, py_dot, theta1_dot, theta2_dot])
         
     @partial(jax.jit, static_argnums=(0,))
-    def check_collision(self, x, obs_center, obs_radius):
+    def check_collision(self, x, obs):
         """Check collision using tractor position for now (FIXME: will be updated later for full geometry)"""
-        dist2objs = jnp.linalg.norm(x[:2] - obs_center, axis=1)
-        return jnp.any(dist2objs < obs_radius)
+        dist2objs = jnp.linalg.norm(x[:2] - obs[:, :2], axis=1)
+        return jnp.any(dist2objs < obs[:, 2])
 
     @partial(jax.jit, static_argnums=(0,))
     def step(self, state: State, action: jax.Array) -> State:
@@ -165,7 +169,7 @@ class TractorTrailer2d:
         q_new = rk4(self.tractor_trailer_dynamics, state.pipeline_state, u_scaled, self.dt)
         
         # Check collision (using tractor position for now)
-        collide = self.check_collision(q_new, self.obs_center, self.obs_radius)
+        collide = self.check_collision(q_new, self.obs)
         
         # If collision, don't update the state
         q = jnp.where(collide, q, q_new)
@@ -175,10 +179,8 @@ class TractorTrailer2d:
     @partial(jax.jit, static_argnums=(0,))
     def get_reward(self, q):
         """Reward based on distance to goal position"""
-        # Scale reward threshold with environment size (was 0.2 for original scale)
-        reward_threshold = 1.2  # 0.2 * 6 to match the 6x scaled environment # TODO: it was 0.2, and need to put it in init
         reward = (
-            1.0 - (jnp.clip(jnp.linalg.norm(q[:2] - self.xg[:2]), 0.0, reward_threshold) / reward_threshold) ** 2
+            1.0 - (jnp.clip(jnp.linalg.norm(q[:2] - self.xg[:2]), 0.0, self.reward_threshold) / self.reward_threshold) ** 2
         )
         return reward
 
@@ -186,10 +188,8 @@ class TractorTrailer2d:
     def eval_xref_logpd(self, xs):
         """Evaluate log probability density with respect to reference trajectory"""
         xs_err = xs[:, :2] - self.xref[:, :2]
-        # Scale reference threshold with environment size (was 0.5 for original scale)
-        ref_threshold = 3.0  # 0.5 * 6 to match the 6x scaled environment # TODO: it was 0.5, and need to put it in init
         logpd = 0.0-(
-            (jnp.clip(jnp.linalg.norm(xs_err, axis=-1), 0.0, ref_threshold) / ref_threshold) ** 2
+            (jnp.clip(jnp.linalg.norm(xs_err, axis=-1), 0.0, self.ref_threshold) / self.ref_threshold) ** 2
         ).mean(axis=-1)
         return logpd # NOTE: unnormalized logpd, log p_demo(Y0) in the paper.
 
@@ -204,9 +204,9 @@ class TractorTrailer2d:
     def render(self, ax, xs: jnp.ndarray):
         """Render the tractor-trailer system"""
         # obstacles
-        for i in range(self.obs_center.shape[0]):
+        for i in range(self.obs.shape[0]):
             circle = plt.Circle(
-                self.obs_center[i, :], self.obs_radius, color="k", fill=True, alpha=0.5
+                self.obs[i, :2], self.obs[i, 2], color="k", fill=True, alpha=0.5
             )
             ax.add_artist(circle)
         
@@ -226,10 +226,12 @@ class TractorTrailer2d:
         #     color='green', alpha=0.7, scale=20, label='Trailer orientation'
         # )
         
+        # Get plot limits from environment
+        x_range, y_range = self.env.get_plot_limits()
         ax.set_xlabel("x")
         ax.set_ylabel("y")
-        ax.set_xlim(-3*6, 3*6)
-        ax.set_ylim(-3*6, 3*6)
+        ax.set_xlim(x_range)
+        ax.set_ylim(y_range)
         ax.set_aspect("equal")
         #ax.grid(True)
         # ax.set_title("Tractor-Trailer 2D")

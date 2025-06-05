@@ -101,19 +101,23 @@ def create_animation(env, trajectory_states, trajectory_actions, args):
     plt.ion()
     fig, ax = plt.subplots(1, 1, figsize=(10, 8))
     
+    # Get plot limits from environment
+    x_range, y_range = env.env.get_plot_limits()
+    
     # Set up plot properties
     ax.set_xlabel("X [m]")
     ax.set_ylabel("Y [m]")
-    ax.set_xlim(-3*6, 3*6)
-    ax.set_ylim(-3*6, 3*6)
+    ax.set_xlim(x_range)
+    ax.set_ylim(y_range)
     ax.set_aspect('equal')
     ax.grid(True)
     ax.set_title("Tractor-Trailer Animation")
     
     # Add obstacles
-    for i in range(env.obs_center.shape[0]):
+    obs = env.env.get_obstacles()
+    for i in range(obs.shape[0]):
         circle = plt.Circle(
-            env.obs_center[i, :], env.obs_radius, color="k", fill=True, alpha=0.5
+            obs[i, :2], obs[i, 2], color="k", fill=True, alpha=0.5
         )
         ax.add_artist(circle)
     
@@ -152,7 +156,7 @@ def create_animation(env, trajectory_states, trajectory_actions, args):
         
         # Update plot
         if args.show_animation:
-            plt.pause(0.05)  # Small pause for animation effect
+            plt.pause(0.01)  # Small pause for animation effect
         else:
             plt.draw()
         
