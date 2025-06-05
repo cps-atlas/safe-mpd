@@ -7,6 +7,7 @@ from dataclasses import dataclass
 import tyro
 from tqdm import tqdm
 from matplotlib import pyplot as plt
+from matplotlib.transforms import Affine2D
 import subprocess
 import glob
 import time
@@ -29,17 +30,19 @@ class Args:
     env_name: str = (
         "tt2d"  # "humanoidstandup", "ant", "halfcheetah", "hopper", "walker2d", "car2d"
     )
+    case: str = "case2"  # "case1" for original obstacles, "case2" for parking scenario
     # diffusion
     Nsample: int = 4000  # number of samples
-    Hsample: int = 50  # horizon
-    Ndiffuse: int = 500  # number of diffusion steps
+    Hsample: int = 60  # horizon
+    Ndiffuse: int = 300  # number of diffusion steps
     temp_sample: float = 0.1  # temperature for sampling
     beta0: float = 1e-4  # initial beta
     betaT: float = 1e-2  # final beta
-    enable_demo: bool = True
+    enable_demo: bool = False
     # animation
     save_animation: bool = True  # flag to enable animation saving
     show_animation: bool = True  # flag to show animation during creation
+    dt: float = 0.25
 
 
 def setup_animation_saving(env_name):
@@ -111,28 +114,104 @@ def create_animation(env, trajectory_states, trajectory_actions, args):
     ax.set_ylim(y_range)
     ax.set_aspect('equal')
     ax.grid(True)
-    ax.set_title("Tractor-Trailer Animation")
+    
+    # Set title based on case
+    if args.case == "case1":
+        ax.set_title("Tractor-Trailer Navigation")
+    elif args.case == "case2":
+        ax.set_title("Tractor-Trailer Parking Scenario")
+    
+    # Add parking space boundaries for case2
+    if args.case == "case2" and hasattr(env.env, 'parking_config'):
+        config = env.env.parking_config
+        rows = config['parking_rows']
+        cols = config['parking_cols']
+        space_width = config['space_width']
+        space_length = config['space_length']
+        y_offset = config['parking_y_offset']
+        
+        # Calculate parking lot position
+        parking_lot_width = cols * space_width
+        parking_lot_height = rows * space_length
+        parking_start_x = -parking_lot_width / 2
+        parking_start_y = y_range[1] - y_offset - parking_lot_height
+        
+        # Draw parking space boundaries
+        for row in range(rows + 1):
+            y = parking_start_y + row * space_length
+            ax.plot([parking_start_x, parking_start_x + parking_lot_width], [y, y], 'k-', alpha=0.3, linewidth=1)
+        
+        for col in range(cols + 1):
+            x = parking_start_x + col * space_width
+            ax.plot([x, x], [parking_start_y, parking_start_y + parking_lot_height], 'k-', alpha=0.3, linewidth=1)
+        
+        # Add parking space numbers
+        for row in range(rows):
+            for col in range(cols):
+                space_num = row * cols + col + 1
+                space_center_x = parking_start_x + (col + 0.5) * space_width
+                space_center_y = parking_start_y + (row + 0.5) * space_length
+                
+                # Color code: target spaces in green, occupied in red, empty in white
+                if space_num in config['target_spaces']:
+                    color = 'lightgreen'
+                    text_color = 'black'
+                elif space_num in config['occupied_spaces']:
+                    color = 'lightcoral'
+                    text_color = 'white'
+                else:
+                    color = 'lightblue'
+                    text_color = 'black'
+                
+                # Add colored background for space number
+                if space_num not in config['occupied_spaces']:  # Don't show numbers on occupied spaces (they have obstacles)
+                    ax.text(space_center_x, space_center_y, str(space_num), 
+                           ha='center', va='center', fontsize=8, fontweight='bold',
+                           bbox=dict(boxstyle="round,pad=0.2", facecolor=color, alpha=0.7),
+                           color=text_color)
     
     # Add obstacles
-    obs = env.env.get_obstacles()
-    for i in range(obs.shape[0]):
-        circle = plt.Circle(
-            obs[i, :2], obs[i, 2], color="k", fill=True, alpha=0.5
-        )
-        ax.add_artist(circle)
+    obstacles = env.env.get_obstacles()
+    obs_circles = obstacles['circles']
+    obs_rectangles = obstacles['rectangles']
+    
+    # Render circular obstacles
+    if obs_circles.shape[0] > 0:
+        for i in range(obs_circles.shape[0]):
+            circle = plt.Circle(
+                obs_circles[i, :2], obs_circles[i, 2], color="k", fill=True, alpha=0.5
+            )
+            ax.add_artist(circle)
+    
+    # Render rectangular obstacles
+    if obs_rectangles.shape[0] > 0:
+        for i in range(obs_rectangles.shape[0]):
+            x_center, y_center, width, height, angle = obs_rectangles[i]
+            
+            # Create rectangle patch
+            rect = plt.Rectangle((-width/2, -height/2), width, height,
+                               linewidth=2, edgecolor='black', facecolor='gray', alpha=0.7)
+            
+            # Apply rotation and translation
+            transform = (Affine2D()
+                       .rotate(angle)
+                       .translate(x_center, y_center) + ax.transData)
+            rect.set_transform(transform)
+            ax.add_patch(rect)
     
     # Add reference trajectory if available
-    if hasattr(env, 'xref'):
+    if hasattr(env, 'xref') and args.case == "case1":  # Only show reference for case1
         ax.plot(env.xref[:, 0], env.xref[:, 1], "g--", alpha=0.5, label="Reference path")
     
-    # Add goal
-    ax.scatter(env.xg[0], env.xg[1], c='red', s=100, marker='*', label='Goal')
+    # Add start and goal markers
+    ax.scatter(env.x0[0], env.x0[1], c='blue', s=150, marker='o', edgecolor='black', linewidth=2, label='Start', zorder=5)
+    ax.scatter(env.xg[0], env.xg[1], c='red', s=150, marker='*', edgecolor='black', linewidth=2, label='Goal', zorder=5)
     
     # Setup animation patches
     env.setup_animation_patches(ax)
     
     # Add trajectory trace
-    trajectory_line, = ax.plot([], [], 'b-', alpha=0.6, linewidth=2, label='Trajectory')
+    trajectory_line, = ax.plot([], [], 'b-', alpha=0.8, linewidth=3, label='Trajectory', zorder=4)
     
     ax.legend()
     fig.tight_layout()
@@ -180,7 +259,7 @@ def create_animation(env, trajectory_states, trajectory_actions, args):
 def run_diffusion(args: Args):
 
     rng = jax.random.PRNGKey(seed=args.seed)
-    env = mbd.envs.get_env(args.env_name)
+    env = mbd.envs.get_env(args.env_name, case=args.case, dt=args.dt, H=args.Hsample)
     Nx = env.observation_size
     Nu = env.action_size
     

@@ -40,10 +40,10 @@ class TractorTrailer2d:
     Action: [v, delta] - velocity and steering angle
     Input constraint: v ∈ [-1, 1], delta ∈ [-55°, 55°]
     """
-    def __init__(self, x0=None, xg=None, env_config=None):
+    def __init__(self, x0=None, xg=None, env_config=None, case="case1", dt=0.2, H=50):
         # Time parameters
-        self.dt = 0.2
-        self.H = 50
+        self.dt = dt
+        self.H = H
         
         # Tractor-trailer parameters
         self.l1 = 3.23  # tractor wheelbase
@@ -54,24 +54,50 @@ class TractorTrailer2d:
         
         # Input constraints
         self.v_max = 3.0  # velocity limit
-        self.delta_max = 75.0 * jnp.pi / 180.0  # steering angle limit in radians
+        self.delta_max = 55.0 * jnp.pi / 180.0  # steering angle limit in radians
         
         # Reward and reference thresholds (hyperparameters)
-        self.reward_threshold = 1.2  # was 0.2 for original scale, scaled by 6x
-        self.ref_threshold = 3.0     # was 0.5 for original scale, scaled by 6x
+        if case == "case1":
+            self.reward_threshold = 1.2  # was 0.2 for original scale, scaled by 6x for [-3, 3]
+            self.ref_threshold = 3.0     # was 0.5 for original scale, scaled by 6x for [-3, 3]
+        elif case == "case2":
+            self.reward_threshold = 25.0  # Larger threshold for parking scenario
+            self.ref_threshold = 3.0     # Larger threshold for parking scenario
         
         # Environment setup
         if env_config is None:
-            self.env = Env()
+            self.env = Env(case=case)
         else:
             self.env = env_config
         
         # Get obstacles from environment
-        self.obs = self.env.get_obstacles()
+        obstacles = self.env.get_obstacles()
+        self.obs_circles = obstacles['circles']
+        self.obs_rectangles = obstacles['rectangles']
         
-        # Initial and goal states: [px, py, theta1, theta2]
-        self.x0 = self.set_initial_pos()
-        self.xg = self.set_goal_pos()
+        # For backward compatibility with existing collision checking
+        self.obs = self.obs_circles
+        
+        # Set initial and goal states based on case and user input
+        if x0 is None:
+            if case == "case1":
+                self.x0 = self.set_initial_pos()
+            elif case == "case2":
+                self.x0 = self.env.get_initial_position_case2()
+        else:
+            self.x0 = x0
+            
+        if xg is None:
+            if case == "case1":
+                self.xg = self.set_goal_pos()
+            elif case == "case2":
+                self.xg = self.env.get_goal_position_case2()
+        else:
+            self.xg = xg
+        
+            
+        print(f"x0: {self.x0}")
+        print(f"xg: {self.xg}")
         
         # Load and process reference trajectory
         xref_original = jnp.load(f"{mbd.__path__[0]}/assets/car2d_xref.npy")
@@ -86,9 +112,9 @@ class TractorTrailer2d:
         xref_2d = jnp.array(xref_interp)
         
         xref_2d = xref_original # TODO: use the original trajectory for now.
-        print(f"xref_2d: {xref_2d}")
+        #print(f"xref_2d: {xref_2d}")
         xref_2d = xref_2d * 6
-        print(f"xref_2d: {xref_2d}")
+        #print(f"xref_2d: {xref_2d}")
         
         # Extend 2D reference to 4D state space [px, py, theta1, theta2]
         xref_diff = jnp.diff(xref_2d, axis=0)
@@ -111,12 +137,16 @@ class TractorTrailer2d:
         self.trailer_wheels = []
         self.hitch_line = None
         
+        # Print environment info
+        if hasattr(self.env, 'print_parking_layout'):
+            self.env.print_parking_layout()
+        
     def set_initial_pos(self, x=-3.0, y=0.0, theta1=np.pi, theta2=np.pi):
-        """Set initial position for tractor-trailer"""
+        """Set initial position for tractor-trailer (case1 default)"""
         return jnp.array([x, y, theta1, theta2])
 
     def set_goal_pos(self, x=3.0, y=0.0, theta1=np.pi, theta2=np.pi):
-        """Set goal position for tractor-trailer"""
+        """Set goal position for tractor-trailer (case1 default)"""
         return jnp.array([x, y, theta1, theta2]) 
 
     def reset(self, rng: jax.Array):
@@ -152,10 +182,194 @@ class TractorTrailer2d:
         return jnp.array([px_dot, py_dot, theta1_dot, theta2_dot])
         
     @partial(jax.jit, static_argnums=(0,))
-    def check_collision(self, x, obs):
-        """Check collision using tractor position for now (FIXME: will be updated later for full geometry)"""
-        dist2objs = jnp.linalg.norm(x[:2] - obs[:, :2], axis=1)
-        return jnp.any(dist2objs < obs[:, 2])
+    def get_tractor_trailer_rectangles(self, x):
+        """Get the corner points of tractor and trailer rectangles for collision checking"""
+        px, py, theta1, theta2 = x
+        
+        # Tractor rectangle (centered at tractor center)
+        tractor_center_x = px + (self.l1/2) * jnp.cos(theta1)
+        tractor_center_y = py + (self.l1/2) * jnp.sin(theta1)
+        
+        # Tractor corners in local coordinates (before rotation)
+        tractor_half_length = self.l1 / 2
+        tractor_half_width = self.tractor_width / 2
+        tractor_local_corners = jnp.array([
+            [-tractor_half_length, -tractor_half_width],  # rear left
+            [-tractor_half_length, tractor_half_width],   # rear right  
+            [tractor_half_length, tractor_half_width],    # front right
+            [tractor_half_length, -tractor_half_width]    # front left
+        ])
+        
+        # Rotate and translate tractor corners
+        cos_theta1, sin_theta1 = jnp.cos(theta1), jnp.sin(theta1)
+        rotation_matrix_1 = jnp.array([[cos_theta1, -sin_theta1], [sin_theta1, cos_theta1]])
+        tractor_corners = (tractor_local_corners @ rotation_matrix_1.T) + jnp.array([tractor_center_x, tractor_center_y])
+        
+        # Trailer rectangle
+        hitch_x = px - self.lh * jnp.cos(theta1)
+        hitch_y = py - self.lh * jnp.sin(theta1)
+        trailer_center_x = hitch_x - (self.l2/2) * jnp.cos(theta2)
+        trailer_center_y = hitch_y - (self.l2/2) * jnp.sin(theta2)
+        
+        # Trailer corners in local coordinates
+        trailer_half_length = self.l2 / 2
+        trailer_half_width = self.trailer_width / 2
+        trailer_local_corners = jnp.array([
+            [-trailer_half_length, -trailer_half_width],  # rear left
+            [-trailer_half_length, trailer_half_width],   # rear right
+            [trailer_half_length, trailer_half_width],    # front right  
+            [trailer_half_length, -trailer_half_width]    # front left
+        ])
+        
+        # Rotate and translate trailer corners
+        cos_theta2, sin_theta2 = jnp.cos(theta2), jnp.sin(theta2)
+        rotation_matrix_2 = jnp.array([[cos_theta2, -sin_theta2], [sin_theta2, cos_theta2]])
+        trailer_corners = (trailer_local_corners @ rotation_matrix_2.T) + jnp.array([trailer_center_x, trailer_center_y])
+        
+        return {
+            'tractor_corners': tractor_corners,
+            'tractor_center': jnp.array([tractor_center_x, tractor_center_y]),
+            'tractor_angle': theta1,
+            'trailer_corners': trailer_corners, 
+            'trailer_center': jnp.array([trailer_center_x, trailer_center_y]),
+            'trailer_angle': theta2
+        }
+
+    @partial(jax.jit, static_argnums=(0,))
+    def check_rectangle_circle_collision(self, rect_corners, circle_center, circle_radius):
+        """Check collision between a rectangle (given by corners) and a circle"""
+        # Find the closest point on the rectangle to the circle center
+        # Get rectangle edges
+        edges = jnp.roll(rect_corners, -1, axis=0) - rect_corners
+        
+        # For each edge, find closest point to circle center
+        edge_starts = rect_corners
+        to_centers = circle_center[None, :] - edge_starts  # Shape: (4, 2)
+        
+        # Project circle center onto each edge
+        edge_lengths_sq = jnp.sum(edges ** 2, axis=1)  # Shape: (4,)
+        edge_lengths_sq = jnp.where(edge_lengths_sq < 1e-8, 1e-8, edge_lengths_sq)  # Avoid division by zero
+        
+        projections = jnp.sum(to_centers * edges, axis=1) / edge_lengths_sq  # Shape: (4,)
+        t_values = jnp.clip(projections, 0.0, 1.0)  # Shape: (4,)
+        
+        # Closest points on edges
+        closest_points = edge_starts + t_values[:, None] * edges  # Shape: (4, 2)
+        
+        # Distances squared from circle center to closest points
+        dist_sqs = jnp.sum((circle_center[None, :] - closest_points) ** 2, axis=1)  # Shape: (4,)
+        min_dist_sq = jnp.min(dist_sqs)
+        
+        return min_dist_sq <= circle_radius ** 2
+
+    @partial(jax.jit, static_argnums=(0,))
+    def check_rectangle_rectangle_collision(self, rect1_corners, rect2_corners):
+        """Check collision between two rectangles using Separating Axis Theorem"""
+        
+        def get_axes(corners):
+            """Get the two axes (edge normals) for a rectangle"""
+            edges = jnp.roll(corners, -1, axis=0) - corners
+            # Get normals (perpendicular to edges) - take first two edges only
+            normals = jnp.array([[-edges[0, 1], edges[0, 0]], 
+                                [-edges[1, 1], edges[1, 0]]])
+            # Normalize
+            norms = jnp.linalg.norm(normals, axis=1, keepdims=True)
+            norms = jnp.where(norms < 1e-8, 1.0, norms)  # Avoid division by zero
+            normals = normals / norms
+            return normals
+        
+        def project_rectangle(corners, axis):
+            """Project rectangle corners onto an axis"""
+            projections = jnp.dot(corners, axis)
+            return jnp.min(projections), jnp.max(projections)
+        
+        # Get axes for both rectangles
+        axes1 = get_axes(rect1_corners)
+        axes2 = get_axes(rect2_corners)
+        all_axes = jnp.vstack([axes1, axes2])  # Shape: (4, 2)
+        
+        # Check separation on each axis using vectorized operations
+        def check_axis_separation(axis):
+            min1, max1 = project_rectangle(rect1_corners, axis)
+            min2, max2 = project_rectangle(rect2_corners, axis)
+            # Return True if separated, False if overlapping
+            return (max1 < min2) | (max2 < min1)
+        
+        # Check all axes
+        separations = jax.vmap(check_axis_separation)(all_axes)  # Shape: (4,)
+        
+        # If any axis shows separation, no collision
+        return ~jnp.any(separations)
+
+    @partial(jax.jit, static_argnums=(0,))
+    def check_collision(self, x, obs_circles, obs_rectangles):
+        """Check collision with full tractor-trailer geometry against all obstacles"""
+        # Get tractor and trailer geometry
+        geometry = self.get_tractor_trailer_rectangles(x)
+        tractor_corners = geometry['tractor_corners']
+        trailer_corners = geometry['trailer_corners']
+        
+        collision = False
+        
+        # Check circular obstacles
+        if obs_circles.shape[0] > 0:
+            def check_circle_collision(circle_obs):
+                circle_center = circle_obs[:2]
+                circle_radius = circle_obs[2]
+                
+                # Check tractor-circle collision
+                tractor_collision = self.check_rectangle_circle_collision(
+                    tractor_corners, circle_center, circle_radius
+                )
+                
+                # Check trailer-circle collision  
+                trailer_collision = self.check_rectangle_circle_collision(
+                    trailer_corners, circle_center, circle_radius
+                )
+                
+                return tractor_collision | trailer_collision
+            
+            # Vectorize over all circular obstacles
+            circle_collisions = jax.vmap(check_circle_collision)(obs_circles)
+            collision = collision | jnp.any(circle_collisions)
+        
+        # Check rectangular obstacles
+        if obs_rectangles.shape[0] > 0:
+            def check_rect_collision(rect_obs):
+                obs_x, obs_y, obs_width, obs_height, obs_angle = rect_obs
+                
+                # Get obstacle rectangle corners
+                obs_half_width = obs_width / 2
+                obs_half_height = obs_height / 2
+                obs_local_corners = jnp.array([
+                    [-obs_half_width, -obs_half_height],
+                    [-obs_half_width, obs_half_height], 
+                    [obs_half_width, obs_half_height],
+                    [obs_half_width, -obs_half_height]
+                ])
+                
+                # Rotate and translate obstacle corners
+                cos_obs, sin_obs = jnp.cos(obs_angle), jnp.sin(obs_angle)
+                obs_rotation = jnp.array([[cos_obs, -sin_obs], [sin_obs, cos_obs]])
+                obs_corners = (obs_local_corners @ obs_rotation.T) + jnp.array([obs_x, obs_y])
+                
+                # Check tractor-rectangle collision
+                tractor_collision = self.check_rectangle_rectangle_collision(
+                    tractor_corners, obs_corners
+                )
+                
+                # Check trailer-rectangle collision
+                trailer_collision = self.check_rectangle_rectangle_collision(
+                    trailer_corners, obs_corners
+                )
+                
+                return tractor_collision | trailer_collision
+            
+            # Vectorize over all rectangular obstacles
+            rect_collisions = jax.vmap(check_rect_collision)(obs_rectangles)
+            collision = collision | jnp.any(rect_collisions)
+        
+        return collision
 
     @partial(jax.jit, static_argnums=(0,))
     def step(self, state: State, action: jax.Array) -> State:
@@ -168,8 +382,8 @@ class TractorTrailer2d:
         q = state.pipeline_state
         q_new = rk4(self.tractor_trailer_dynamics, state.pipeline_state, u_scaled, self.dt)
         
-        # Check collision (using tractor position for now)
-        collide = self.check_collision(q_new, self.obs)
+        # Check collision with full geometry
+        collide = self.check_collision(q_new, self.obs_circles, self.obs_rectangles)
         
         # If collision, don't update the state
         q = jnp.where(collide, q, q_new)
@@ -203,12 +417,29 @@ class TractorTrailer2d:
 
     def render(self, ax, xs: jnp.ndarray):
         """Render the tractor-trailer system"""
-        # obstacles
-        for i in range(self.obs.shape[0]):
-            circle = plt.Circle(
-                self.obs[i, :2], self.obs[i, 2], color="k", fill=True, alpha=0.5
-            )
-            ax.add_artist(circle)
+        # Render circular obstacles
+        if self.obs_circles.shape[0] > 0:
+            for i in range(self.obs_circles.shape[0]):
+                circle = plt.Circle(
+                    self.obs_circles[i, :2], self.obs_circles[i, 2], color="k", fill=True, alpha=0.5
+                )
+                ax.add_artist(circle)
+        
+        # Render rectangular obstacles
+        if self.obs_rectangles.shape[0] > 0:
+            for i in range(self.obs_rectangles.shape[0]):
+                x_center, y_center, width, height, angle = self.obs_rectangles[i]
+                
+                # Create rectangle patch
+                rect = plt.Rectangle((-width/2, -height/2), width, height,
+                                   linewidth=2, edgecolor='black', facecolor='gray', alpha=0.7)
+                
+                # Apply rotation and translation
+                transform = (Affine2D()
+                           .rotate(angle)
+                           .translate(x_center, y_center) + ax.transData)
+                rect.set_transform(transform)
+                ax.add_patch(rect)
         
         # Plot trajectory
         ax.scatter(xs[:, 0], xs[:, 1], c=range(self.H + 1), cmap="Reds")
