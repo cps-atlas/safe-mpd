@@ -7,6 +7,11 @@ from dataclasses import dataclass
 import tyro
 from tqdm import tqdm
 from matplotlib import pyplot as plt
+from matplotlib.transforms import Affine2D
+import subprocess
+import glob
+import time
+import numpy as np
 
 import mbd
 
@@ -23,22 +28,238 @@ class Args:
     not_render: bool = False
     # env
     env_name: str = (
-        "car2d"  # "humanoidstandup", "ant", "halfcheetah", "hopper", "walker2d", "car2d"
+        "tt2d"  # "humanoidstandup", "ant", "halfcheetah", "hopper", "walker2d", "car2d"
     )
+    case: str = "case2"  # "case1" for original obstacles, "case2" for parking scenario
     # diffusion
-    Nsample: int = 2048  # number of samples
-    Hsample: int = 99  # horizon
-    Ndiffuse: int = 100  # number of diffusion steps
+    Nsample: int = 4000  # number of samples
+    Hsample: int = 60  # horizon
+    Ndiffuse: int = 300  # number of diffusion steps
     temp_sample: float = 0.1  # temperature for sampling
     beta0: float = 1e-4  # initial beta
     betaT: float = 1e-2  # final beta
-    enable_demo: bool = True
+    enable_demo: bool = False
+    # animation
+    save_animation: bool = True  # flag to enable animation saving
+    show_animation: bool = True  # flag to show animation during creation
+    dt: float = 0.25
+
+
+def setup_animation_saving(env_name):
+    """Setup directories for animation saving"""
+    current_directory_path = os.getcwd()
+    animation_path = f"{mbd.__path__[0]}/../results/{env_name}/animations"
+    if not os.path.exists(animation_path):
+        os.makedirs(animation_path)
+    # if file exists, delete all
+    if os.path.exists(animation_path):
+        for file_name in glob.glob(f"{animation_path}/*.png"):
+            os.remove(file_name)
+    return animation_path
+
+
+def export_video(env_name):
+    """Convert image sequence to video using ffmpeg"""
+    # Use the same path structure as setup_animation_saving
+    animation_path = f"{mbd.__path__[0]}/../results/{env_name}/animations"
+    
+    # Debug: Check if frames exist
+    frame_files = glob.glob(f"{animation_path}/frame_*.png")
+    print(f"Animation path: {animation_path}")
+    print(f"Found {len(frame_files)} frame files")
+    if len(frame_files) > 0:
+        print(f"First frame: {frame_files[0]}")
+        print(f"Last frame: {frame_files[-1]}")
+    else:
+        print("ERROR: No frame files found!")
+        return
+    
+    # Create video using ffmpeg
+    result = subprocess.call(['ffmpeg', '-y',  # -y to overwrite existing files
+                     '-framerate', '10',  # Input framerate
+                     '-i', f'{animation_path}/frame_%04d.png',
+                     '-vf', 'scale=1920:1080,fps=30',  # Scale and set output framerate
+                     '-pix_fmt', 'yuv420p',
+                     f'{animation_path}/tractor_trailer_animation.mp4'])
+    
+    if result == 0:
+        print("Video created successfully!")
+        # Clean up individual frames
+        for file_name in glob.glob(f"{animation_path}/*.png"):
+            os.remove(file_name)
+        print(f"Animation saved to: {animation_path}/tractor_trailer_animation.mp4")
+    else:
+        print(f"FFmpeg failed with return code: {result}")
+
+
+def create_animation(env, trajectory_states, trajectory_actions, args):
+    """Create animation of the tractor-trailer trajectory"""
+    print("Creating animation...")
+    
+    # Setup animation saving if enabled
+    if args.save_animation:
+        animation_path = setup_animation_saving(args.env_name)
+    
+    # Setup interactive plotting
+    plt.ion()
+    fig, ax = plt.subplots(1, 1, figsize=(10, 8))
+    
+    # Get plot limits from environment
+    x_range, y_range = env.env.get_plot_limits()
+    
+    # Set up plot properties
+    ax.set_xlabel("X [m]")
+    ax.set_ylabel("Y [m]")
+    ax.set_xlim(x_range)
+    ax.set_ylim(y_range)
+    ax.set_aspect('equal')
+    ax.grid(True)
+    
+    # Set title based on case
+    if args.case == "case1":
+        ax.set_title("Tractor-Trailer Navigation")
+    elif args.case == "case2":
+        ax.set_title("Tractor-Trailer Parking Scenario")
+    
+    # Add parking space boundaries for case2
+    if args.case == "case2" and hasattr(env.env, 'parking_config'):
+        config = env.env.parking_config
+        rows = config['parking_rows']
+        cols = config['parking_cols']
+        space_width = config['space_width']
+        space_length = config['space_length']
+        y_offset = config['parking_y_offset']
+        
+        # Calculate parking lot position
+        parking_lot_width = cols * space_width
+        parking_lot_height = rows * space_length
+        parking_start_x = -parking_lot_width / 2
+        parking_start_y = y_range[1] - y_offset - parking_lot_height
+        
+        # Draw parking space boundaries
+        for row in range(rows + 1):
+            y = parking_start_y + row * space_length
+            ax.plot([parking_start_x, parking_start_x + parking_lot_width], [y, y], 'k-', alpha=0.3, linewidth=1)
+        
+        for col in range(cols + 1):
+            x = parking_start_x + col * space_width
+            ax.plot([x, x], [parking_start_y, parking_start_y + parking_lot_height], 'k-', alpha=0.3, linewidth=1)
+        
+        # Add parking space numbers
+        for row in range(rows):
+            for col in range(cols):
+                space_num = row * cols + col + 1
+                space_center_x = parking_start_x + (col + 0.5) * space_width
+                space_center_y = parking_start_y + (row + 0.5) * space_length
+                
+                # Color code: target spaces in green, occupied in red, empty in white
+                if space_num in config['target_spaces']:
+                    color = 'lightgreen'
+                    text_color = 'black'
+                elif space_num in config['occupied_spaces']:
+                    color = 'lightcoral'
+                    text_color = 'white'
+                else:
+                    color = 'lightblue'
+                    text_color = 'black'
+                
+                # Add colored background for space number
+                if space_num not in config['occupied_spaces']:  # Don't show numbers on occupied spaces (they have obstacles)
+                    ax.text(space_center_x, space_center_y, str(space_num), 
+                           ha='center', va='center', fontsize=8, fontweight='bold',
+                           bbox=dict(boxstyle="round,pad=0.2", facecolor=color, alpha=0.7),
+                           color=text_color)
+    
+    # Add obstacles
+    obstacles = env.env.get_obstacles()
+    obs_circles = obstacles['circles']
+    obs_rectangles = obstacles['rectangles']
+    
+    # Render circular obstacles
+    if obs_circles.shape[0] > 0:
+        for i in range(obs_circles.shape[0]):
+            circle = plt.Circle(
+                obs_circles[i, :2], obs_circles[i, 2], color="k", fill=True, alpha=0.5
+            )
+            ax.add_artist(circle)
+    
+    # Render rectangular obstacles
+    if obs_rectangles.shape[0] > 0:
+        for i in range(obs_rectangles.shape[0]):
+            x_center, y_center, width, height, angle = obs_rectangles[i]
+            
+            # Create rectangle patch
+            rect = plt.Rectangle((-width/2, -height/2), width, height,
+                               linewidth=2, edgecolor='black', facecolor='gray', alpha=0.7)
+            
+            # Apply rotation and translation
+            transform = (Affine2D()
+                       .rotate(angle)
+                       .translate(x_center, y_center) + ax.transData)
+            rect.set_transform(transform)
+            ax.add_patch(rect)
+    
+    # Add reference trajectory if available
+    if hasattr(env, 'xref') and args.case == "case1":  # Only show reference for case1
+        ax.plot(env.xref[:, 0], env.xref[:, 1], "g--", alpha=0.5, label="Reference path")
+    
+    # Add start and goal markers
+    ax.scatter(env.x0[0], env.x0[1], c='blue', s=150, marker='o', edgecolor='black', linewidth=2, label='Start', zorder=5)
+    ax.scatter(env.xg[0], env.xg[1], c='red', s=150, marker='*', edgecolor='black', linewidth=2, label='Goal', zorder=5)
+    
+    # Setup animation patches
+    env.setup_animation_patches(ax)
+    
+    # Add trajectory trace
+    trajectory_line, = ax.plot([], [], 'b-', alpha=0.8, linewidth=3, label='Trajectory', zorder=4)
+    
+    ax.legend()
+    fig.tight_layout()
+    
+    # Animation loop
+    traj_x = []
+    traj_y = []
+    
+    for frame_idx, (state, action) in enumerate(zip(trajectory_states, trajectory_actions)):
+        # Convert jax arrays to numpy for matplotlib
+        state_np = np.array(state)
+        action_np = np.array(action) if action is not None else None
+        
+        # Update robot visualization
+        env.update_animation_patches(state_np, action_np)
+        
+        # Update trajectory trace
+        traj_x.append(state_np[0])
+        traj_y.append(state_np[1])
+        trajectory_line.set_data(traj_x, traj_y)
+        
+        # Update plot
+        if args.show_animation:
+            plt.pause(0.01)  # Small pause for animation effect
+        else:
+            plt.draw()
+        
+        # Save frame if animation saving is enabled
+        if args.save_animation:
+            frame_filename = f"{animation_path}/frame_{frame_idx:04d}.png"
+            plt.savefig(frame_filename, dpi=100, bbox_inches='tight')
+    
+    # Show final result
+    if args.show_animation:
+        plt.show()
+    
+    plt.ioff()
+    plt.close()
+    
+    # Export video if saving animation
+    if args.save_animation:
+        export_video(args.env_name)
 
 
 def run_diffusion(args: Args):
 
     rng = jax.random.PRNGKey(seed=args.seed)
-    env = mbd.envs.get_env(args.env_name)
+    env = mbd.envs.get_env(args.env_name, case=args.case, dt=args.dt, H=args.Hsample)
     Nx = env.observation_size
     Nu = env.action_size
     
@@ -133,7 +354,7 @@ def run_diffusion(args: Args):
         jnp.save(f"{path}/mu_0ts.npy", Yi)
         
         #if args.env_name == "car2d":
-        fig, ax = plt.subplots(1, 1, figsize=(3, 3))
+        fig, ax = plt.subplots(1, 1, figsize=(10, 10))
         # rollout
         xs = jnp.array([state_init.pipeline_state])
         state = state_init
@@ -147,6 +368,24 @@ def run_diffusion(args: Args):
         plt.switch_backend('TkAgg')  # Switch to interactive backend
         plt.show()
         plt.savefig(f"{path}/rollout.png")
+        
+        # Create animation if requested
+        if args.save_animation or args.show_animation:
+            # Prepare trajectory data for animation
+            trajectory_states = [state_init.pipeline_state]
+            trajectory_actions = []
+            state = state_init
+            for t in range(Yi.shape[1]):
+                action = Yi[-1, t]
+                trajectory_actions.append(action)
+                state = step_env_jit(state, action)
+                trajectory_states.append(state.pipeline_state)
+            
+            # Add final state with no action
+            trajectory_actions.append(None)
+            
+            # Create animation
+            create_animation(env, trajectory_states, trajectory_actions, args)
 
     rewss_final, _ = rollout_us(state_init, Yi[-1])
     rew_final = rewss_final.mean()
