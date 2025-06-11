@@ -241,7 +241,7 @@ if __name__ == "__main__":
     args = tyro.cli(Args)
     env = mbd.envs.get_env(args.env_name, case=args.case, dt=args.dt, H=args.Hsample)
     
-    env.set_init_pos(x=5.0, y=3.0, theta1=0.0, theta2=0.0)
+    env.set_init_pos(x=5.0, y=6.0, theta1=0.0, theta2=0.0)
     
     rew_final = run_diffusion(args=args, env=env)
     end_time = time.time()

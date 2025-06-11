@@ -59,7 +59,7 @@ class TractorTrailer2d:
         # --- reward-shaping hyper-parameters ----------------------
         self.theta_max = jnp.pi / 2          # 90° cap in rad
         self.phi_max = jnp.deg2rad(30.0)     # 30° cap for articulation
-        self.d_thr = 1.5 * (self.l1 + self.lh + self.l2)  # 'one rig length'
+        self.d_thr = 1.0 * (self.l1 + self.lh + self.l2)  # 'one rig length'
         self.k_switch = 0.5                  # [m] slope of logistic switch
         self.steering_weight = 0.05          # weight for trajectory-level steering cost
         
@@ -243,8 +243,18 @@ class TractorTrailer2d:
         # ---------------------------------------------------------------
         # 2. heading-to-goal alignment  r_hdg
         wrap_pi = lambda a: (a + jnp.pi) % (2.*jnp.pi) - jnp.pi
-        e_theta1 = wrap_pi(theta1 - thetag)
-        e_theta2 = wrap_pi(theta2 - thetag)
+        
+        # Allow both forward and backward orientations (0° and 180° difference should both be rewarded)
+        # Calculate angle errors for both forward and backward orientations, then take the minimum
+        e_theta1_forward = wrap_pi(theta1 - thetag)
+        e_theta1_backward = wrap_pi(theta1 - thetag - jnp.pi)  # 180° offset
+        e_theta1 = jnp.where(jnp.abs(e_theta1_forward) < jnp.abs(e_theta1_backward), 
+                            e_theta1_forward, e_theta1_backward)
+        
+        e_theta2_forward = wrap_pi(theta2 - thetag)
+        e_theta2_backward = wrap_pi(theta2 - thetag - jnp.pi)  # 180° offset
+        e_theta2 = jnp.where(jnp.abs(e_theta2_forward) < jnp.abs(e_theta2_backward),
+                            e_theta2_forward, e_theta2_backward)
 
         r_hdg = 0.5 * ( 1.0 - (jnp.abs(e_theta1) / self.theta_max) ** 2
                       + 1.0 - (jnp.abs(e_theta2) / self.theta_max) ** 2 )
