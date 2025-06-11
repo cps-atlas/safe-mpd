@@ -140,7 +140,7 @@ def create_animation(env, trajectory_states, trajectory_actions, args):
         parking_lot_width = cols * space_width
         parking_lot_height = rows * space_length
         parking_start_x = -parking_lot_width / 2
-        parking_start_y = y_range[1] - y_offset - parking_lot_height
+        parking_start_y = y_range[0] + y_offset
         
         # Draw parking space boundaries
         for row in range(rows + 1):
@@ -297,7 +297,7 @@ def create_denoising_animation(env, Yi, args, step_env_jit, state_init):
         parking_lot_width = cols * space_width
         parking_lot_height = rows * space_length
         parking_start_x = -parking_lot_width / 2
-        parking_start_y = y_range[1] - y_offset - parking_lot_height
+        parking_start_y = y_range[0] + y_offset
         
         # Draw parking space boundaries
         for row in range(rows + 1):

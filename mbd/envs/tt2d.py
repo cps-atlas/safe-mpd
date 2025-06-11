@@ -88,17 +88,17 @@ class TractorTrailer2d:
         # Set initial and goal states based on case and user input
         if x0 is None:
             if case == "case1":
-                self.x0 = self.set_initial_pos()
+                self.set_init_pos()
             elif case == "case2":
-                self.x0 = self.env.get_initial_position_case2()
+                self.x0 = self.env.get_default_init_pos(case=case)
         else:
             self.x0 = x0
             
         if xg is None:
             if case == "case1":
-                self.xg = self.set_goal_pos()
+                self.set_goal_pos()
             elif case == "case2":
-                self.xg = self.env.get_goal_position_case2()
+                self.xg = self.env.get_default_goal_pos(case=case)
         else:
             self.xg = xg
         
@@ -148,13 +148,13 @@ class TractorTrailer2d:
         if hasattr(self.env, 'print_parking_layout'):
             self.env.print_parking_layout()
         
-    def set_initial_pos(self, x=-3.0, y=0.0, theta1=np.pi, theta2=np.pi):
+    def set_init_pos(self, x=-3.0, y=0.0, theta1=np.pi, theta2=np.pi):
         """Set initial position for tractor-trailer (case1 default)"""
-        return jnp.array([x, y, theta1, theta2])
+        self.x0 =jnp.array([x, y, theta1, theta2])
 
     def set_goal_pos(self, x=3.0, y=0.0, theta1=np.pi, theta2=np.pi):
         """Set goal position for tractor-trailer (case1 default)"""
-        return jnp.array([x, y, theta1, theta2]) 
+        self.xg = jnp.array([x, y, theta1, theta2]) 
 
     def reset(self, rng: jax.Array):
         """Resets the environment to an initial state."""
@@ -489,6 +489,55 @@ class TractorTrailer2d:
 
     def render(self, ax, xs: jnp.ndarray):
         """Render the tractor-trailer system"""
+        # Add parking space boundaries for case2
+        if hasattr(self.env, 'case') and self.env.case == "case2" and hasattr(self.env, 'parking_config'):
+            config = self.env.parking_config
+            rows = config['parking_rows']
+            cols = config['parking_cols']
+            space_width = config['space_width']
+            space_length = config['space_length']
+            y_offset = config['parking_y_offset']
+            
+            # Calculate parking lot position (using same logic as env.py)
+            parking_lot_width = cols * space_width
+            parking_lot_height = rows * space_length
+            parking_start_x = -parking_lot_width / 2
+            parking_start_y = self.env.y_range[0] + y_offset  # Bottom of parking area
+            
+            # Draw parking space boundaries
+            for row in range(rows + 1):
+                y = parking_start_y + row * space_length
+                ax.plot([parking_start_x, parking_start_x + parking_lot_width], [y, y], 'k-', alpha=0.3, linewidth=1)
+            
+            for col in range(cols + 1):
+                x = parking_start_x + col * space_width
+                ax.plot([x, x], [parking_start_y, parking_start_y + parking_lot_height], 'k-', alpha=0.3, linewidth=1)
+            
+            # Add parking space numbers
+            for row in range(rows):
+                for col in range(cols):
+                    space_num = row * cols + col + 1
+                    space_center_x = parking_start_x + (col + 0.5) * space_width
+                    space_center_y = parking_start_y + (row + 0.5) * space_length
+                    
+                    # Color code: target spaces in green, occupied in red, empty in white
+                    if space_num in config['target_spaces']:
+                        color = 'lightgreen'
+                        text_color = 'black'
+                    elif space_num in config['occupied_spaces']:
+                        color = 'lightcoral'
+                        text_color = 'white'
+                    else:
+                        color = 'lightblue'
+                        text_color = 'black'
+                    
+                    # Add colored background for space number
+                    if space_num not in config['occupied_spaces']:  # Don't show numbers on occupied spaces (they have obstacles)
+                        ax.text(space_center_x, space_center_y, str(space_num), 
+                               ha='center', va='center', fontsize=8, fontweight='bold',
+                               bbox=dict(boxstyle="round,pad=0.2", facecolor=color, alpha=0.7),
+                               color=text_color)
+        
         # Render circular obstacles
         if self.obs_circles.shape[0] > 0:
             for i in range(self.obs_circles.shape[0]):

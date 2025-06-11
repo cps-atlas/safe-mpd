@@ -11,7 +11,7 @@ Visulization for the diffusion, and some functions for model-based diffusion (or
 
 
 class Env:
-    def __init__(self, width=36.0, height=36.0, case="case1", parking_config=None, resolution=0.1):
+    def __init__(self, width=36.0, height=32.0, case="case1", parking_config=None, resolution=0.1):
         self.width = width
         self.height = height
         self.resolution = resolution
@@ -45,7 +45,7 @@ class Env:
             'parking_cols': 8,
             'space_width': 3.5,     # Width of each parking space
             'space_length': 7.0,    # Length of each parking space
-            'parking_y_offset': 8.0, # Distance from start area to parking lot
+            'parking_y_offset': 2.0, # Distance from start area to parking lot
             'occupied_spaces': [1, 2,  4, 5, 6, 7, 9, 10, 12, 14, 15 ],  # 1-indexed, 4 and 9 are vacant
             #'occupied_spaces': [],  # 1-indexed, 4 and 9 are vacant
             'target_spaces': [3, 11],  # Target: tractor in 4, trailer in 9
@@ -77,7 +77,7 @@ class Env:
     def set_obs_rectangle_case2(self):
         """Set rectangular obstacles for case 2 (parking scenario)"""
         obs_rectangle = [
-            [0.0, -5.0, 10.0, 4.0, 0.0]
+            [0.0, -15.0, 10.0, 4.0, 0.0]
         ]
         return obs_rectangle
     
@@ -120,7 +120,7 @@ class Env:
         
         # Starting position of parking lot (bottom-left corner)
         parking_start_x = -parking_lot_width / 2
-        parking_start_y = self.y_range[1] - y_offset - parking_lot_height
+        parking_start_y = self.y_range[0] + y_offset
         
         # Create obstacles for occupied spaces
         for space_num in occupied_spaces:
@@ -157,7 +157,7 @@ class Env:
         parking_lot_width = cols * space_width
         parking_lot_height = rows * space_length
         parking_start_x = -parking_lot_width / 2
-        parking_start_y = self.y_range[1] - y_offset - parking_lot_height
+        parking_start_y = self.y_range[0] + y_offset
         
         # Convert 1-indexed space number to row, col (0-indexed)
         space_idx = space_num - 1
@@ -170,22 +170,28 @@ class Env:
         
         return space_center_x, space_center_y
 
-    def get_initial_position_case2(self):
-        """Get initial position for case 2 (parking scenario)"""
-        # Start from left top corner
-        start_x = self.x_range[0] + 2.0  # Small offset from boundary
-        start_y = self.y_range[1] - 2.0  # Small offset from top
-        theta1 = 0.1  # Nearly zero angle
-        theta2 = 0.1  # Nearly zero angle
+    def get_default_init_pos(self, case):
+        """Get default initial position"""
+        if case == "case2":
+            # Start from left top corner
+            start_x = self.x_range[0] + 2.0  # Small offset from boundary
+            start_y = self.y_range[1] - 2.0  # Small offset from top
+            theta1 = 0.1  # Nearly zero angle
+            theta2 = 0.1  # Nearly zero angle
+        else:
+            raise ValueError(f"Unknown case: {case}")
         return jnp.array([start_x, start_y, theta1, theta2])
 
-    def get_goal_position_case2(self):
-        """Get goal position for case 2 (parking scenario)"""
-        target_space = self.parking_config['target_spaces'][0]  # Tractor target (space 9)
-        goal_x, goal_y = self.get_parking_space_center(target_space)
-        # Goal orientation: facing into the parking space (approximately pi/2 for vertical spaces)
-        theta1 = -np.pi / 2
-        theta2 = -np.pi / 2
+    def get_default_goal_pos(self, case):
+        """Get default goal position"""
+        if case == "case2":
+            target_space = self.parking_config['target_spaces'][0]  # Tractor target (space 9)
+            goal_x, goal_y = self.get_parking_space_center(target_space)
+            # Goal orientation: facing into the parking space (approximately pi/2 for vertical spaces)
+            theta1 = -np.pi / 2
+            theta2 = -np.pi / 2
+        else:
+            raise ValueError(f"Unknown case: {case}")
         return jnp.array([goal_x, goal_y, theta1, theta2])
 
     def get_obstacles(self):
@@ -229,7 +235,7 @@ class Env:
         print("O = Occupied, E = Empty, T = Target")
         print("-" * (cols * 4 + 1))
         
-        for row in range(rows):
+        for row in range(rows-1, -1, -1):  # Iterate rows in reverse order
             line = "|"
             for col in range(cols):
                 space_num = row * cols + col + 1

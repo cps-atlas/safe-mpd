@@ -32,10 +32,10 @@ class Args:
     )
     case: str = "case2"  # "case1" for original obstacles, "case2" for parking scenario
     # diffusion
-    Nsample: int = 4000  # number of samples
+    Nsample: int = 5000  # number of samples
     Hsample: int = 60  # horizon
     Ndiffuse: int = 100  # number of diffusion steps
-    temp_sample: float = 0.1  # temperature for sampling
+    temp_sample: float = 0.02  # temperature for sampling
     beta0: float = 1e-4  # initial beta
     betaT: float = 1e-2  # final beta
     enable_demo: bool = False
@@ -46,10 +46,9 @@ class Args:
     dt: float = 0.25
 
 
-def run_diffusion(args: Args):
+def run_diffusion(args: Args, env):
 
     rng = jax.random.PRNGKey(seed=args.seed)
-    env = mbd.envs.get_env(args.env_name, case=args.case, dt=args.dt, H=args.Hsample)
     Nx = env.observation_size
     Nu = env.action_size
     
@@ -237,7 +236,14 @@ def run_diffusion(args: Args):
 if __name__ == "__main__":
     import time
     start_time = time.time()
-    rew_final = run_diffusion(args=tyro.cli(Args))
+    
+    # Create environment first
+    args = tyro.cli(Args)
+    env = mbd.envs.get_env(args.env_name, case=args.case, dt=args.dt, H=args.Hsample)
+    
+    env.set_init_pos(x=5.0, y=3.0, theta1=0.0, theta2=0.0)
+    
+    rew_final = run_diffusion(args=args, env=env)
     end_time = time.time()
     print(f"Time taken: {end_time - start_time:.2f} seconds")
     print(f"final reward = {rew_final:.2e}")
