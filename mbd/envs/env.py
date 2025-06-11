@@ -1,6 +1,14 @@
 import numpy as np
 import jax.numpy as jnp
 
+"""
+Created on June 11th, 2025
+@author: Taekyung Kim
+
+@description: 
+Visulization for the diffusion, and some functions for model-based diffusion (originated from the original MBD code).
+"""
+
 
 class Env:
     def __init__(self, width=36.0, height=36.0, case="case1", parking_config=None, resolution=0.1):

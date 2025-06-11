@@ -56,6 +56,12 @@ class TractorTrailer2d:
         self.v_max = 3.0  # velocity limit
         self.delta_max = 55.0 * jnp.pi / 180.0  # steering angle limit in radians
         
+        # --- reward-shaping hyper-parameters ----------------------
+        self.theta_max = jnp.pi / 2          # 90° cap in rad
+        self.phi_max = jnp.deg2rad(30.0)     # 30° cap for articulation
+        self.d_thr = 1.5 * (self.l1 + self.lh + self.l2)  # 'one rig length'
+        self.k_switch = 0.5                  # [m] slope of logistic switch
+        
         # Reward and reference thresholds (hyperparameters)
         if case == "case1":
             self.reward_threshold = 1.2  # was 0.2 for original scale, scaled by 6x for [-3, 3]
@@ -407,10 +413,18 @@ class TractorTrailer2d:
 
     @partial(jax.jit, static_argnums=(0,))
     def get_reward(self, q):
-        """Reward based on distance to goal position for both tractor and trailer"""
-        # Tractor position (first two elements of state)
-        tractor_pos = q[:2]
-        tractor_goal = self.xg[:2]
+        """
+        Stage-weighted reward:
+          – position early,
+          – heading + articulation near goal,
+          – optional steering-effort term handled at trajectory level.
+        """
+        # ---------------------------------------------------------------
+        # 0. convenience shorthands
+        px, py, theta1, theta2 = q
+        pgx, pgy, thetag      = self.xg[:3]        # goal pos, goal heading
+        tractor_pos           = jnp.array([px, py])
+        tractor_goal          = self.xg[:2]
         
         # Compute trailer position from current state
         trailer_pos = self.get_trailer_position(q)
@@ -418,21 +432,39 @@ class TractorTrailer2d:
         # Compute trailer goal position from goal state
         trailer_goal = self.get_trailer_position(self.xg)
         
-        # Tractor positional cost
-        tractor_dist = jnp.linalg.norm(tractor_pos - tractor_goal)
-        tractor_reward = (
-            1.0 - (jnp.clip(tractor_dist, 0.0, self.reward_threshold) / self.reward_threshold) ** 2
-        )
-        
-        # Trailer positional cost
         trailer_dist = jnp.linalg.norm(trailer_pos - trailer_goal)
         trailer_reward = (
             1.0 - (jnp.clip(trailer_dist, 0.0, self.reward_threshold) / self.reward_threshold) ** 2
-        )
-        
-        # Combine both rewards (equal weighting for now)
-        reward = 0.5 * tractor_reward + 0.5 * trailer_reward
-        
+        ) # TODO: currently not using
+
+        # ---------------------------------------------------------------
+        # 1. positional reward   (unchanged maths, new symbol r_pos)
+        d_pos   = jnp.linalg.norm(tractor_pos - tractor_goal)
+        r_pos   = 1.0 - (jnp.clip(d_pos, 0., self.reward_threshold)
+                         / self.reward_threshold) ** 2
+
+        # ---------------------------------------------------------------
+        # 2. heading-to-goal alignment  r_hdg
+        wrap_pi = lambda a: (a + jnp.pi) % (2.*jnp.pi) - jnp.pi
+        e_theta1 = wrap_pi(theta1 - thetag)
+        e_theta2 = wrap_pi(theta2 - thetag)
+
+        r_hdg = 0.5 * ( 1.0 - (jnp.abs(e_theta1) / self.theta_max) ** 2
+                      + 1.0 - (jnp.abs(e_theta2) / self.theta_max) ** 2 )
+
+        # ---------------------------------------------------------------
+        # 3. articulation regulariser  r_art
+        e_phi  = wrap_pi(theta1 - theta2)
+        r_art  = 1.0 - (jnp.abs(e_phi) / self.phi_max) ** 2
+
+        # ---------------------------------------------------------------
+        # 4. logistic distance switch  w_theta(d)
+        σ  = lambda z: 1.0 / (1.0 + jnp.exp(-z))
+        wθ = σ((self.d_thr - d_pos) / self.k_switch)      # ∈ (0,1)
+
+        # ---------------------------------------------------------------
+        # 5. weighted stage cost
+        reward = (1.0 - wθ) * r_pos + wθ * (0.6 * r_hdg + 0.4 * r_art)
         return reward
 
     @partial(jax.jit, static_argnums=(0,))
