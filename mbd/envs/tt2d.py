@@ -60,7 +60,7 @@ class TractorTrailer2d:
         self.theta_max = jnp.pi / 2          # 90° cap in rad
         self.phi_max = jnp.deg2rad(30.0)     # 30° cap for articulation
         self.d_thr = 1.0 * (self.l1 + self.lh + self.l2)  # 'one rig length'
-        self.k_switch = 0.5                  # [m] slope of logistic switch
+        self.k_switch = 2.5                  # [m] slope of logistic switch
         self.steering_weight = 0.05          # weight for trajectory-level steering cost
         
         # Reward and reference thresholds (hyperparameters)
@@ -148,9 +148,58 @@ class TractorTrailer2d:
         if hasattr(self.env, 'print_parking_layout'):
             self.env.print_parking_layout()
         
-    def set_init_pos(self, x=-3.0, y=0.0, theta1=np.pi, theta2=np.pi):
-        """Set initial position for tractor-trailer (case1 default)"""
-        self.x0 =jnp.array([x, y, theta1, theta2])
+    def set_init_pos(self, x=None, y=None, dx=None, dy=None, theta1=0.0, theta2=0.0):
+        """
+        Set initial position for tractor-trailer.
+        
+        Args:
+            x, y: Direct coordinates (for case1 or manual positioning)
+            dx, dy: Geometric positioning relative to parking lot (for case2)
+                dx: Distance from tractor front face to target parking space center (x-direction)
+                dy: Distance from tractor to parking lot entrance line (y-direction)
+            theta1, theta2: Initial orientations for tractor and trailer
+        """
+        if hasattr(self.env, 'case') and self.env.case == "case2" and dx is not None and dy is not None:
+            # Get parking configuration
+            config = self.env.parking_config
+            target_spaces = config['target_spaces']
+            space_length = config['space_length']
+            
+            # Get centers of both target parking spaces
+            target_centers = []
+            for space_num in target_spaces:
+                center_x, center_y = self.env.get_parking_space_center(space_num)
+                target_centers.append((center_x, center_y))
+            
+            # Find the target space with the larger y coordinate (higher up)
+            target_centers = sorted(target_centers, key=lambda p: p[1])  # Sort by y
+            higher_target_x, higher_target_y = target_centers[-1]  # Take the one with larger y
+            
+            # Calculate parking lot entrance line (above the higher target space)
+            entrance_y = higher_target_y + space_length / 2
+            
+            # Calculate initial tractor position
+            # dx: positive distance from target x to tractor front face
+            # The front face is at (px + l1 * cos(theta1), py + l1 * sin(theta1))
+            # We want: front_face_x = target_x + dx
+            # So: px + l1 * cos(theta1) = target_x + dx
+            # Therefore: px = target_x + dx - l1 * cos(theta1)
+            target_x = target_centers[0][0]  # Use first target (tractor target) for x reference
+            px = target_x + dx - self.l1 * np.cos(theta1)
+            
+            # dy: positive distance from entrance line to tractor
+            py = entrance_y + dy
+            
+            self.x0 = jnp.array([px, py, theta1, theta2])
+            
+        elif x is not None and y is not None:
+            # Direct coordinate specification
+            self.x0 = jnp.array([x, y, theta1, theta2])
+        else:
+            # Default case1 values
+            x = x if x is not None else -3.0
+            y = y if y is not None else 0.0
+            self.x0 = jnp.array([x, y, theta1, theta2])
 
     def set_goal_pos(self, x=3.0, y=0.0, theta1=np.pi, theta2=np.pi):
         """Set goal position for tractor-trailer (case1 default)"""
@@ -202,9 +251,12 @@ class TractorTrailer2d:
         # Check collision with full geometry
         collide = self.check_collision(q_new, self.obs_circles, self.obs_rectangles)
         
-        # If collision, don't update the state
+        # If collision, don't update the state but apply collision penalty
         q = jnp.where(collide, q, q_new)
-        reward = self.get_reward(q)
+        
+        # Compute reward: normal reward if no collision, collision penalty if collision
+        reward = jnp.where(collide, 0.0, self.get_reward(q))  # 0.0 is the maximum penalty
+        
         return state.replace(pipeline_state=q, obs=q, reward=reward, done=0.0)
 
     @partial(jax.jit, static_argnums=(0,))
@@ -266,12 +318,14 @@ class TractorTrailer2d:
 
         # ---------------------------------------------------------------
         # 4. logistic distance switch  w_theta(d)
-        σ  = lambda z: 1.0 / (1.0 + jnp.exp(-z))
-        wθ = σ((self.d_thr - d_pos) / self.k_switch)      # ∈ (0,1)
+        sigmoid  = lambda z: 1.0 / (1.0 + jnp.exp(-z))
+        w_theta = sigmoid((self.d_thr - d_pos) / self.k_switch)      # ∈ (0,1)
+        # set upper bound on w_theta
+        w_theta = jnp.clip(w_theta, 0.0, 0.7) # prevent dropping off all the position reward
 
         # ---------------------------------------------------------------
         # 5. weighted stage cost
-        reward = 0.8*((1.0 - wθ) * r_pos + wθ * r_hdg) + 0.2 * r_art
+        reward = 0.8*((1.0 - w_theta) * r_pos + w_theta * r_hdg) + 0.2 * r_art
         return reward
 
     
@@ -601,7 +655,8 @@ class TractorTrailer2d:
     def setup_animation_patches(self, ax, tractor_color='blue', trailer_color='red'):
         """Initialize the patches for tractor-trailer visualization"""
         
-        # Tractor body (rectangle)
+        # Tractor body (rectangle) - spans from rear axle to front axle
+        # In local coordinates: rear axle at (-l1/2, 0), front axle at (+l1/2, 0)
         self.tractor_body = ax.add_patch(
             plt.Rectangle((-self.l1/2, -self.tractor_width/2),
                          self.l1, self.tractor_width,
@@ -615,9 +670,9 @@ class TractorTrailer2d:
                          linewidth=2, edgecolor='black', facecolor=trailer_color, alpha=0.7)
         )
         
-        # Wheels
-        wheel_width = 0.3
-        wheel_length = 0.15
+        # Wheels - positioned at (0,0) in local coordinates, will be translated to axle positions
+        wheel_width = 0.45
+        wheel_length = 0.8
         
         # Tractor wheels (front and rear)
         for i in range(2):
@@ -681,7 +736,8 @@ class TractorTrailer2d:
         # Get positions
         positions = self.get_tractor_trailer_positions(x)
         
-        # Tractor body transform (centered at tractor center)
+        # Tractor body transform (centered between rear and front axles)
+        # The body rectangle spans from rear axle to front axle
         tractor_center_x = px + (self.l1/2) * np.cos(theta1)
         tractor_center_y = py + (self.l1/2) * np.sin(theta1)
         transform_tractor_body = (Affine2D()
@@ -697,18 +753,20 @@ class TractorTrailer2d:
         
         # Wheel transforms
         transforms_tractor_wheels = []
-        # Tractor rear wheel
+        # Tractor rear wheel (no steering)
         transforms_tractor_wheels.append(
             Affine2D().rotate(theta1).translate(*positions['tractor_rear']) + plt.gca().transData
         )
         # Tractor front wheel (with steering angle if u is provided)
+        # The wheel should rotate around its center at the front axle position
         steering_angle = 0.0
         if u is not None:
             v, delta = u
             steering_angle = delta
-        transforms_tractor_wheels.append(
-            Affine2D().rotate(theta1 + steering_angle).translate(*positions['tractor_front']) + plt.gca().transData
-        )
+        front_wheel_transform = (Affine2D()
+                               .rotate(theta1 + steering_angle)
+                               .translate(*positions['tractor_front']) + plt.gca().transData)
+        transforms_tractor_wheels.append(front_wheel_transform)
         
         transforms_trailer_wheels = []
         # Trailer wheels

@@ -35,7 +35,7 @@ class Args:
     Nsample: int = 5000  # number of samples
     Hsample: int = 60  # horizon
     Ndiffuse: int = 100  # number of diffusion steps
-    temp_sample: float = 0.02  # temperature for sampling
+    temp_sample: float = 0.01  # temperature for sampling
     beta0: float = 1e-4  # initial beta
     betaT: float = 1e-2  # final beta
     enable_demo: bool = False
@@ -241,7 +241,10 @@ if __name__ == "__main__":
     args = tyro.cli(Args)
     env = mbd.envs.get_env(args.env_name, case=args.case, dt=args.dt, H=args.Hsample)
     
-    env.set_init_pos(x=5.0, y=6.0, theta1=0.0, theta2=0.0)
+    # Set initial position using geometric parameters relative to parking lot
+    # dx: distance from tractor front face to target parking space center
+    # dy: distance from tractor to parking lot entrance line
+    env.set_init_pos(dx=15.0, dy=6.0, theta1=0.0, theta2=0.0)
     
     rew_final = run_diffusion(args=args, env=env)
     end_time = time.time()
