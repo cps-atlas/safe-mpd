@@ -34,7 +34,7 @@ class Args:
     # diffusion
     Nsample: int = 4000  # number of samples
     Hsample: int = 60  # horizon
-    Ndiffuse: int = 300  # number of diffusion steps
+    Ndiffuse: int = 100  # number of diffusion steps
     temp_sample: float = 0.1  # temperature for sampling
     beta0: float = 1e-4  # initial beta
     betaT: float = 1e-2  # final beta

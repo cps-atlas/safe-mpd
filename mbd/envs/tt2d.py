@@ -180,6 +180,21 @@ class TractorTrailer2d:
         )
         
         return jnp.array([px_dot, py_dot, theta1_dot, theta2_dot])
+    
+    @partial(jax.jit, static_argnums=(0,))
+    def get_trailer_position(self, x):
+        """Get the trailer center position from state"""
+        px, py, theta1, theta2 = x
+        
+        # Hitch point (at rear of tractor)
+        hitch_x = px - self.lh * jnp.cos(theta1)
+        hitch_y = py - self.lh * jnp.sin(theta1)
+        
+        # Trailer center position
+        trailer_center_x = hitch_x - self.l2 * jnp.cos(theta2)
+        trailer_center_y = hitch_y - self.l2 * jnp.sin(theta2)
+        
+        return jnp.array([trailer_center_x, trailer_center_y])
         
     @partial(jax.jit, static_argnums=(0,))
     def get_tractor_trailer_rectangles(self, x):
@@ -392,10 +407,32 @@ class TractorTrailer2d:
 
     @partial(jax.jit, static_argnums=(0,))
     def get_reward(self, q):
-        """Reward based on distance to goal position"""
-        reward = (
-            1.0 - (jnp.clip(jnp.linalg.norm(q[:2] - self.xg[:2]), 0.0, self.reward_threshold) / self.reward_threshold) ** 2
+        """Reward based on distance to goal position for both tractor and trailer"""
+        # Tractor position (first two elements of state)
+        tractor_pos = q[:2]
+        tractor_goal = self.xg[:2]
+        
+        # Compute trailer position from current state
+        trailer_pos = self.get_trailer_position(q)
+        
+        # Compute trailer goal position from goal state
+        trailer_goal = self.get_trailer_position(self.xg)
+        
+        # Tractor positional cost
+        tractor_dist = jnp.linalg.norm(tractor_pos - tractor_goal)
+        tractor_reward = (
+            1.0 - (jnp.clip(tractor_dist, 0.0, self.reward_threshold) / self.reward_threshold) ** 2
         )
+        
+        # Trailer positional cost
+        trailer_dist = jnp.linalg.norm(trailer_pos - trailer_goal)
+        trailer_reward = (
+            1.0 - (jnp.clip(trailer_dist, 0.0, self.reward_threshold) / self.reward_threshold) ** 2
+        )
+        
+        # Combine both rewards (equal weighting for now)
+        reward = 0.5 * tractor_reward + 0.5 * trailer_reward
+        
         return reward
 
     @partial(jax.jit, static_argnums=(0,))
