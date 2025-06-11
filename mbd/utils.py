@@ -109,6 +109,7 @@ def create_animation(env, trajectory_states, trajectory_actions, args):
         animation_path = setup_animation_saving(args.env_name, "trajectory")
     
     # Setup interactive plotting
+    plt.close() # close any existing figures
     plt.ion()
     fig, ax = plt.subplots(1, 1, figsize=(10, 8))
     
