@@ -40,9 +40,9 @@ class Args:
     betaT: float = 1e-2  # final beta
     enable_demo: bool = False
     # animation
-    save_animation: bool = False  # flag to enable animation saving
+    save_animation: bool = False # flag to enable animation saving
     show_animation: bool = True  # flag to show animation during creation
-    save_denoising_animation: bool = True  # flag to enable denoising process visualization
+    save_denoising_animation: bool = False  # flag to enable denoising process visualization
     dt: float = 0.25
 
 
@@ -80,6 +80,40 @@ def run_diffusion(args: Args):
     YN = jnp.zeros([args.Hsample, Nu])
 
     @jax.jit
+    def compute_steering_cost(Y0s):
+        """
+        Compute trajectory-level steering cost for action sequences.
+        Y0s: (Nsample, Hsample, Nu) where Nu=2 (v, delta)
+        Returns: (Nsample,) steering costs
+        """
+        # Extract steering angles (second action dimension)
+        deltas = Y0s[:, :, 1]  # Shape: (Nsample, Hsample)
+        
+        # Scale to actual steering angles for cost computation
+        deltas_scaled = deltas * env.delta_max
+        
+        # 1. Steering magnitude cost: r_delta = 1.0 - (delta_t / delta_max)^2
+        r_delta = 1.0 - (jnp.abs(deltas) ** 2)  # deltas already normalized to [-1,1]
+        
+        # 2. Steering rate cost: r_deltadot = 1.0 - ((delta_t - delta_{t-1}) / (0.1 * delta_max))^2
+        delta_diffs = jnp.diff(deltas_scaled, axis=1)  # Shape: (Nsample, Hsample-1)
+        delta_rate_threshold = 0.1 * env.delta_max
+        r_deltadot = 1.0 - jnp.clip((jnp.abs(delta_diffs) / delta_rate_threshold) ** 2, 0.0, 1.0)
+        
+        # 3. Combined steering cost: r_steer = 0.5 * (r_delta + r_deltadot)
+        # For r_deltadot, pad with 1.0 at the beginning (no rate cost for first timestep)
+        r_deltadot_padded = jnp.concatenate([
+            jnp.ones((Y0s.shape[0], 1)), r_deltadot
+        ], axis=1)  # Shape: (Nsample, Hsample)
+        
+        r_steer = 0.5 * (r_delta + r_deltadot_padded)
+        
+        # Average over trajectory horizon
+        r_steer_avg = jnp.mean(r_steer, axis=1)  # Shape: (Nsample,)
+        
+        return r_steer_avg
+
+    @jax.jit
     def reverse_once(carry, unused):
         i, rng, Ybar_i = carry
         Yi = Ybar_i * jnp.sqrt(alphas_bar[i])
@@ -93,10 +127,15 @@ def run_diffusion(args: Args):
         # esitimate mu_0tm1
         rewss, qs = jax.vmap(rollout_us_jit, in_axes=(None, 0))(state_init, Y0s)
         rews = rewss.mean(axis=-1)
-        rew_std = rews.std() # NOTE: scalar
+        
+        # Compute steering cost and blend with geometric rewards
+        r_steer = compute_steering_cost(Y0s)  # Shape: (Nsample,)
+        rews_combined = rews + env.steering_weight * r_steer  # Blend steering cost
+        
+        rew_std = rews_combined.std() # NOTE: scalar
         rew_std = jnp.where(rew_std < 1e-4, 1.0, rew_std) # NOTE: at early stage it is near 0, and increase to 0.1 ish after.
-        rew_mean = rews.mean()
-        logp0 = (rews - rew_mean) / rew_std / args.temp_sample
+        rew_mean = rews_combined.mean()
+        logp0 = (rews_combined - rew_mean) / rew_std / args.temp_sample
 
         # evalulate demo
         if args.enable_demo:
@@ -117,7 +156,7 @@ def run_diffusion(args: Args):
 
         Ybar_im1 = Yim1 / jnp.sqrt(alphas_bar[i - 1])
 
-        return (i - 1, rng, Ybar_im1), rews.mean()
+        return (i - 1, rng, Ybar_im1), rews_combined.mean()
 
     # run reverse
     def reverse(YN, rng):
@@ -155,9 +194,16 @@ def run_diffusion(args: Args):
         if args.enable_demo:
             ax.plot(env.xref[:, 0], env.xref[:, 1], "g--", label="RRT path")
         ax.legend()
+        
         plt.switch_backend('TkAgg')  # Switch to interactive backend
-        plt.show()
+        plt.draw()  # Ensure the plot is fully rendered
+        plt.show()  # Show blocking so user can examine the static plot
+        
         plt.savefig(f"{path}/rollout.png")
+        
+        # Close the static plot before showing animations
+        if args.show_animation or args.save_denoising_animation:
+            plt.close(fig)
         
         # Create denoising animation if requested
         if args.save_denoising_animation:
