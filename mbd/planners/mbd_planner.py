@@ -32,17 +32,17 @@ class Args:
     )
     case: str = "case2"  # "case1" for original obstacles, "case2" for parking scenario
     # diffusion
-    Nsample: int = 5000  # number of samples
-    Hsample: int = 60  # horizon
+    Nsample: int = 20000  # number of samples
+    Hsample: int = 50  # horizon
     Ndiffuse: int = 100  # number of diffusion steps
     temp_sample: float = 0.01  # temperature for sampling
     beta0: float = 1e-4  # initial beta
     betaT: float = 1e-2  # final beta
     enable_demo: bool = False
     # animation
-    save_animation: bool = False # flag to enable animation saving
+    save_animation: bool = True # flag to enable animation saving
     show_animation: bool = True  # flag to show animation during creation
-    save_denoising_animation: bool = False  # flag to enable denoising process visualization
+    save_denoising_animation: bool = True  # flag to enable denoising process visualization
     dt: float = 0.25
 
 
@@ -244,7 +244,7 @@ if __name__ == "__main__":
     # Set initial position using geometric parameters relative to parking lot
     # dx: distance from tractor front face to target parking space center
     # dy: distance from tractor to parking lot entrance line
-    env.set_init_pos(dx=15.0, dy=6.0, theta1=0.0, theta2=0.0)
+    env.set_init_pos(dx=5.0, dy=6.0, theta1=0.0, theta2=0.0)
     
     rew_final = run_diffusion(args=args, env=env)
     end_time = time.time()
