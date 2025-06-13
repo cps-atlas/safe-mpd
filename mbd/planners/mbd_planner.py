@@ -40,9 +40,9 @@ class Args:
     betaT: float = 1e-2  # final beta
     enable_demo: bool = False
     # animation
-    save_animation: bool = True # flag to enable animation saving
+    save_animation: bool = False # flag to enable animation saving
     show_animation: bool = True  # flag to show animation during creation
-    save_denoising_animation: bool = True  # flag to enable denoising process visualization
+    save_denoising_animation: bool = False  # flag to enable denoising process visualization
     dt: float = 0.25
 
 
@@ -244,7 +244,8 @@ if __name__ == "__main__":
     # Set initial position using geometric parameters relative to parking lot
     # dx: distance from tractor front face to target parking space center
     # dy: distance from tractor to parking lot entrance line
-    env.set_init_pos(dx=5.0, dy=6.0, theta1=0.0, theta2=0.0)
+    env.set_init_pos(dx=4.0, dy=8.0, theta1=jnp.pi/2, theta2=jnp.pi/2)
+    
     
     rew_final = run_diffusion(args=args, env=env)
     end_time = time.time()
