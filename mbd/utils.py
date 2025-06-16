@@ -1,5 +1,5 @@
 import jax
-from brax.io import html
+#from brax.io import html
 import os
 import glob
 import subprocess
@@ -27,17 +27,17 @@ def rollout_us(step_env, state, us):
     _, (rews, pipline_states) = jax.lax.scan(step, state, us) # NOTE: returns stack of (rew, pipline_state). _ is the final carry, which is final state in this case
     return rews, pipline_states
 
-def render_us(step_env, sys, state, us):
-    rollout = []
-    rew_sum = 0.0
-    Hsample = us.shape[0]
-    for i in range(Hsample):
-        rollout.append(state.pipeline_state)
-        state = step_env(state, us[i])
-        rew_sum += state.reward
-    # rew_mean = rew_sum / (Hsample)
-    # print(f"evaluated reward mean: {rew_mean:.2e}")
-    return html.render(sys, rollout)
+# def render_us(step_env, sys, state, us):
+#     rollout = []
+#     rew_sum = 0.0
+#     Hsample = us.shape[0]
+#     for i in range(Hsample):
+#         rollout.append(state.pipeline_state)
+#         state = step_env(state, us[i])
+#         rew_sum += state.reward
+#     # rew_mean = rew_sum / (Hsample)
+#     # print(f"evaluated reward mean: {rew_mean:.2e}")
+#     return html.render(sys, rollout)
 
 
 def setup_animation_saving(env_name, animation_type="trajectory"):
