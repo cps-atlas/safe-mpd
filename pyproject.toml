@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=42.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mbd"
+version = "0.0.1"
+description = "Model-based diffusion package"
+authors = [
+    {name = "Taekyung Kim", email = "taekyung.kim@toyota.com"}
+]
+dependencies = [
+    "gym",
+    "pandas",
+    "seaborn",
+    "matplotlib",
+    "imageio",
+    "control",
+    "tqdm",
+    "tyro",
+    "meshcat",
+    "sympy",
+    "gymnax",
+    "jax",
+    "distrax",
+    "gputil",
+    "jaxopt"
+]
+
+[tool.setuptools]
+packages = ["mbd"] 
