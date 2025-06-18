@@ -1,0 +1,23 @@
+# MBD Planner Configuration
+# exp
+seed: 0
+not_render: False
+
+# env
+env_name: "tt2d"
+case: "case2"
+
+# diffusion
+Nsample: 20000  # number of samples
+Hsample: 50     # horizon
+Ndiffuse: 100   # number of diffusion steps
+temp_sample: 0.01  # temperature for sampling
+beta0: 1e-4     # initial beta
+betaT: 1e-2     # final beta
+enable_demo: False
+
+# animation
+save_animation: False
+show_animation: True
+save_denoising_animation: False
+dt: 0.25 
