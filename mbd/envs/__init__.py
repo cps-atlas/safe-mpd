@@ -1,5 +1,3 @@
-
-
 from .car2d import Car2d
 from .tt2d import TractorTrailer2d
 

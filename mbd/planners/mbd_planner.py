@@ -3,7 +3,6 @@ import os
 import jax
 from jax import numpy as jnp
 from dataclasses import dataclass
-import tyro
 from tqdm import tqdm
 from matplotlib import pyplot as plt
 import time
@@ -19,18 +18,14 @@ from mbd.utils import (
 # config.update("jax_enable_x64", True)
 
 
-## load config
 @dataclass
-class Args:
+class MBDConfig:
     # exp
     seed: int = 0
     disable_recommended_params: bool = False
-    not_render: bool = False
     # env
-    env_name: str = (
-        "tt2d"  # "humanoidstandup", "ant", "halfcheetah", "hopper", "walker2d", "car2d"
-    )
-    case: str = "case2"  # "case1" for original obstacles, "case2" for parking scenario
+    env_name: str = "tt2d"
+    case: str = "case2" # "case1" for original obstacles, "case2" for parking scenario
     # diffusion
     Nsample: int = 20000  # number of samples
     Hsample: int = 50  # horizon
@@ -40,14 +35,64 @@ class Args:
     betaT: float = 1e-2  # final beta
     enable_demo: bool = False
     # animation
+    render: bool = True
     save_animation: bool = False # flag to enable animation saving
     show_animation: bool = True  # flag to show animation during creation
     save_denoising_animation: bool = False  # flag to enable denoising process visualization
     dt: float = 0.25
 
 
-def run_diffusion(args: Args, env):
+def dict_to_config_obj(config_dict):
+    """
+    Convert dictionary to MBDConfig dataclass for JAX compatibility.
+    
+    Args:
+        config_dict: Configuration dictionary
+    
+    Returns:
+        MBDConfig: Dataclass with configuration values
+    """
+    # Create dataclass with values from dict - all parameters must be provided
+    # Explicitly convert types to ensure proper typing
+    return MBDConfig(
+        seed=int(config_dict["seed"]),
+        disable_recommended_params=bool(config_dict["disable_recommended_params"]),
+        render=bool(config_dict["render"]),
+        env_name=str(config_dict["env_name"]),
+        case=str(config_dict["case"]),
+        Nsample=int(config_dict["Nsample"]),
+        Hsample=int(config_dict["Hsample"]),
+        Ndiffuse=int(config_dict["Ndiffuse"]),
+        temp_sample=float(config_dict["temp_sample"]),
+        beta0=float(config_dict["beta0"]),
+        betaT=float(config_dict["betaT"]),
+        enable_demo=bool(config_dict["enable_demo"]),
+        save_animation=bool(config_dict["save_animation"]),
+        show_animation=bool(config_dict["show_animation"]),
+        save_denoising_animation=bool(config_dict["save_denoising_animation"]),
+        dt=float(config_dict["dt"]),
+    )
 
+
+def run_diffusion(args=None, env=None):
+    """
+    Run the diffusion-based planning algorithm.
+    
+    Args:
+        args: Configuration dictionary with diffusion parameters.
+        env: Environment object
+    
+    Returns:
+        rew_final: Final reward value
+        Y0: Final action sequence
+        trajectory_states: Trajectory states
+    """
+    # Convert dictionary to dataclass if needed
+    if isinstance(args, dict):
+        args = dict_to_config_obj(args)
+    elif args is None:
+        raise ValueError("args parameter is required and cannot be None")
+    
     rng = jax.random.PRNGKey(seed=args.seed)
     Nx = env.observation_size
     Nu = env.action_size
@@ -168,28 +213,40 @@ def run_diffusion(args: Args, env):
                 Ybars.append(Yi)
                 # Update the progress bar's suffix to show the current reward
                 pbar.set_postfix({"rew": f"{rew:.2e}"})
-        return jnp.array(Ybars)
+        return jnp.array(Ybars), Yi  # Return both all Ybars and final Yi
 
     rng_exp, rng = jax.random.split(rng)
-    Yi = reverse(YN, rng_exp) # NOTE: YN: all zeros, one trajectory of actions 
+    Ybars, Y0 = reverse(YN, rng_exp) # NOTE: YN: all zeros, one trajectory of actions 
     end_time = time.time()
     print(f"Time taken: {end_time - start_time:.2f} seconds")
     
-    if not args.not_render:
+    # Store the final trajectory for potential extraction
+    final_trajectory_actions = Y0  # This is the optimized action sequence
+    
+    # Compute trajectory states (needed for path extraction)
+    xs = jnp.array([state_init.pipeline_state])
+    state = state_init
+    for t in range(Y0.shape[0]):
+        state = step_env_jit(state, Y0[t])
+        xs = jnp.concatenate([xs, state.pipeline_state[None]], axis=0)
+    trajectory_states = xs
+    
+    if args.render:
         path = f"{mbd.__path__[0]}/../results/{args.env_name}"
         if not os.path.exists(path):
             os.makedirs(path)
-        jnp.save(f"{path}/mu_0ts.npy", Yi)
+        jnp.save(f"{path}/mu_0ts.npy", Ybars)
+        
+        # Store final actions for path extraction
+        jnp.save(f"{path}/final_actions.npy", Y0)
+        
+        # Store the trajectory states for path extraction
+        jnp.save(f"{path}/trajectory_states.npy", trajectory_states)
         
         #if args.env_name == "car2d":
         fig, ax = plt.subplots(1, 1, figsize=(10, 10))
-        # rollout
-        xs = jnp.array([state_init.pipeline_state])
-        state = state_init
-        for t in range(Yi.shape[1]):
-            state = step_env_jit(state, Yi[-1, t]) # NOTE: Yi[-1, :] is the action at the last denoised step. 
-            xs = jnp.concatenate([xs, state.pipeline_state[None]], axis=0)
-        env.render(ax, xs)
+        # rollout (trajectory already computed above)
+        env.render(ax, trajectory_states)
         if args.enable_demo:
             ax.plot(env.xref[:, 0], env.xref[:, 1], "g--", label="RRT path")
         ax.legend()
@@ -206,48 +263,54 @@ def run_diffusion(args: Args, env):
         
         # Create denoising animation if requested
         if args.save_denoising_animation:
-            create_denoising_animation(env, Yi, args, step_env_jit, state_init)
+            create_denoising_animation(env, Ybars, args, step_env_jit, state_init)
             
         # Create animation if requested
         if args.save_animation or args.show_animation:
             # Prepare trajectory data for animation
-            trajectory_states = [state_init.pipeline_state]
+            trajectory_states_list = [state_init.pipeline_state]
             trajectory_actions = []
             state = state_init
-            for t in range(Yi.shape[1]):
-                action = Yi[-1, t]
+            for t in range(Y0.shape[0]):  # Use Y0
+                action = Y0[t]
                 trajectory_actions.append(action)
                 state = step_env_jit(state, action)
-                trajectory_states.append(state.pipeline_state)
+                trajectory_states_list.append(state.pipeline_state)
             
             # Add final state with no action
             trajectory_actions.append(None)
             
             # Create animation
-            create_animation(env, trajectory_states, trajectory_actions, args)
+            create_animation(env, trajectory_states_list, trajectory_actions, args)
         
 
-    rewss_final, _ = rollout_us_jit(state_init, Yi[-1])
+    rewss_final, _ = rollout_us_jit(state_init, Y0)  # Use Y0
     rew_final = rewss_final.mean()
 
-    return rew_final
+    return rew_final, Y0, trajectory_states  # Return additional data for path extraction
 
 
 if __name__ == "__main__":
     import time
     start_time = time.time()
     
-    # Create environment first
-    args = tyro.cli(Args)
-    env = mbd.envs.get_env(args.env_name, case=args.case, dt=args.dt, H=args.Hsample)
+    # For standalone testing, use default config
+    config = MBDConfig()
+    
+    # Create environment
+    env = mbd.envs.get_env(
+        config.env_name, 
+        case=config.case, 
+        dt=config.dt, 
+        H=config.Hsample
+    )
     
     # Set initial position using geometric parameters relative to parking lot
     # dx: distance from tractor front face to target parking space center
     # dy: distance from tractor to parking lot entrance line
-    env.set_init_pos(dx=4.0, dy=8.0, theta1=jnp.pi/2, theta2=jnp.pi/2)
+    env.set_init_pos(dx=4.0, dy=6.0, theta1=0, theta2=0)
     
-    
-    rew_final = run_diffusion(args=args, env=env)
+    rew_final, Y0, trajectory_states = run_diffusion(args=config, env=env)
     end_time = time.time()
     print(f"Time taken: {end_time - start_time:.2f} seconds")
     print(f"final reward = {rew_final:.2e}")
