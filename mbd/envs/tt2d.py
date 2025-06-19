@@ -247,7 +247,7 @@ class TractorTrailer2d:
         
         # Compute reward: normal reward if no collision/violation, penalty if collision/hitch violation
         reward = self.get_reward(q)
-        reward = jnp.where(collide, reward-1, reward)
+        reward = jnp.where(collide, reward-1.0, reward) # FIXME: a magic parameter here should be fixed. It's penalizing the collision
         
         return state.replace(pipeline_state=q, obs=q, reward=reward, done=0.0)
 
@@ -509,7 +509,7 @@ class TractorTrailer2d:
         sigmoid  = lambda z: 1.0 / (1.0 + jnp.exp(-z))
         w_theta = sigmoid((self.d_thr - d_pos) / self.k_switch)      # ∈ (0,1)
         # set upper bound on w_theta
-        w_theta = jnp.clip(w_theta, 0.0, 0.7) # prevent dropping off all the position reward
+        w_theta = jnp.clip(w_theta, 0.0, 0.85) # prevent dropping off all the position reward # FIXME: magic parameter. Works from 0.7 - 0.85
 
         # ---------------------------------------------------------------
         # 5. weighted stage cost
@@ -739,14 +739,46 @@ class TractorTrailer2d:
         
         # JIT-compile the actual computation
         @jax.jit
-        def _eval_xref_logpd(xs, xref, ref_threshold):
-            xs_err = xs[:, :2] - xref[:, :2]
-            logpd = 0.0-(
-                (jnp.clip(jnp.linalg.norm(xs_err, axis=-1), 0.0, ref_threshold) / ref_threshold) ** 2
-            ).mean(axis=-1)
-            return logpd
+        def _eval_xref_logpd(xs, xref, ref_threshold, theta_max):
+            # Position error
+            xs_pos_err = xs[:, :2] - xref[:, :2]
+            pos_err_norm = jnp.linalg.norm(xs_pos_err, axis=-1)
+            pos_logpd = -(jnp.clip(pos_err_norm, 0.0, ref_threshold) / ref_threshold) ** 2
+            
+            # Angle error with proper wrapping and consistent forward/backward handling
+            wrap_pi = lambda a: (a + jnp.pi) % (2.*jnp.pi) - jnp.pi
+            
+            # Evaluate both angles for forward scenario
+            theta1_err_forward = wrap_pi(xs[:, 2] - xref[:, 2])
+            theta2_err_forward = wrap_pi(xs[:, 3] - xref[:, 3])
+            total_err_forward = jnp.abs(theta1_err_forward) + jnp.abs(theta2_err_forward)
+            
+            # Evaluate both angles for backward scenario (both angles offset by 180°)
+            theta1_err_backward = wrap_pi(xs[:, 2] - xref[:, 2] - jnp.pi)
+            theta2_err_backward = wrap_pi(xs[:, 3] - xref[:, 3] - jnp.pi)
+            total_err_backward = jnp.abs(theta1_err_backward) + jnp.abs(theta2_err_backward)
+            
+            # Choose the scenario (forward vs backward) with smaller total error
+            use_forward = total_err_forward < total_err_backward
+            theta1_err = jnp.where(use_forward, theta1_err_forward, theta1_err_backward)
+            theta2_err = jnp.where(use_forward, theta2_err_forward, theta2_err_backward)
+            
+            theta1_logpd = -(jnp.clip(jnp.abs(theta1_err), 0.0, theta_max) / theta_max) ** 2
+            theta2_logpd = -(jnp.clip(jnp.abs(theta2_err), 0.0, theta_max) / theta_max) ** 2
+            
+            # Combined logpd with weights
+            # Position gets more weight than individual angles
+            pos_weight = 0.8
+            theta1_weight = 0.1
+            theta2_weight = 0.1
+            
+            combined_logpd = (pos_weight * pos_logpd + 
+                            theta1_weight * theta1_logpd + 
+                            theta2_weight * theta2_logpd)
+            
+            return combined_logpd.mean(axis=-1)
         
-        return _eval_xref_logpd(xs, self.xref, self.ref_threshold)
+        return _eval_xref_logpd(xs, self.xref, 15.0, jnp.deg2rad(90.0)) # FIXME: magic parameter
 
     @property
     def action_size(self):

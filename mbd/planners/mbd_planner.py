@@ -35,7 +35,7 @@ class MBDConfig:
     enable_demo: bool = True
     # animation
     render: bool = True
-    save_animation: bool = True # flag to enable animation saving
+    save_animation: bool = False # flag to enable animation saving
     show_animation: bool = True  # flag to show animation during creation
     save_denoising_animation: bool = False  # flag to enable denoising process visualization
     dt: float = 0.25
@@ -171,7 +171,7 @@ def run_diffusion(args=None, env=None):
         # sample from q_i
         rng, Y0s_rng = jax.random.split(rng)
         eps_u = jax.random.normal(Y0s_rng, (args.Nsample, args.Hsample, Nu)) # NOTE: Sample from N(0, I) 
-        Y0s = eps_u * sigmas[i]/jnp.sqrt(alphas_bar[i-1]) + Ybar_i
+        Y0s = eps_u * sigmas[i]/jnp.sqrt(alphas_bar[i-1]) + Ybar_i # TODO: changed this based on the paper (it seems the original code is wrong)
         Y0s = jnp.clip(Y0s, -1.0, 1.0) # NOTE: clip action to [-1, 1] (it is defined in dynamics)
 
         # esitimate mu_0tm1
@@ -190,13 +190,13 @@ def run_diffusion(args=None, env=None):
         # evalulate demo
         if args.enable_demo:
             xref_logpds = jax.vmap(env.eval_xref_logpd)(qs)
-            xref_logpds = xref_logpds - xref_logpds.max()
+            xref_logpds = xref_logpds - xref_logpds.max() # FIXME: without - max, it can deviate from the demo if necessary !!
             logpdemo = (
                 (xref_logpds + env.rew_xref - rew_mean) / rew_std / args.temp_sample
             )
             demo_mask = logpdemo > logp0
             logp0 = jnp.where(demo_mask, logpdemo, logp0)
-            logp0 = (logp0 - logp0.mean()) / logp0.std() / args.temp_sample
+            #logp0 = (logp0 - logp0.mean()) / logp0.std() / args.temp_sample # FIXME: I commented it out since I don't know why this is necessary.
 
         weights = jax.nn.softmax(logp0)
         Ybar = jnp.einsum("n,nij->ij", weights, Y0s)  # NOTE: update only with reward
