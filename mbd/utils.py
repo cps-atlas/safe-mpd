@@ -380,53 +380,55 @@ def create_denoising_animation(env, Yi, args, step_env_jit, state_init):
     # Loop through each denoising step
     frame_idx = 0
     total_steps = Yi.shape[0]
+    frame_skip = 3  # Skip every other frame
     
     with tqdm(range(total_steps), desc="Creating denoising animation") as pbar:
         for step in pbar:
-            # Get actions for current denoising step
-            actions = Yi[step]  # Shape: [Hsample, Nu]
-            
-            # Rollout trajectory for current denoising step
-            trajectory_states = [state_init.pipeline_state]
-            state = state_init
-            
-            traj_x = [np.array(state_init.pipeline_state)[0]]
-            traj_y = [np.array(state_init.pipeline_state)[1]]
-            
-            for t in range(actions.shape[0]):
-                action_np = np.array(actions[t])
-                state = step_env_jit(state, actions[t])
-                state_np = np.array(state.pipeline_state)
-                trajectory_states.append(state_np)
-                traj_x.append(state_np[0])
-                traj_y.append(state_np[1])
-            
-            # Update scatter plot with colored points along trajectory
-            if len(traj_x) > 0:
-                positions = np.column_stack([traj_x, traj_y])
-                colors = np.arange(len(traj_x))  # Color progression along trajectory
-                trajectory_scatter.set_offsets(positions)
-                trajectory_scatter.set_array(colors)
+            # Only process frames that aren't skipped
+            if step % frame_skip == 0:
+                # Get actions for current denoising step
+                actions = Yi[step]  # Shape: [Hsample, Nu]
                 
-            # Update trajectory line using set_data
-            trajectory_line.set_data(traj_x, traj_y)
-            # Update opacity to show progression
-            alpha = 0.3 + 0.7 * (step / max(1, total_steps - 1))  # Gradually increase opacity
-            trajectory_line.set_alpha(alpha)
-            
-            # Update title to show current denoising step
-            diffusion_step = args.Ndiffuse - 1 - step
-            title = f"Denoising Step {diffusion_step}/{args.Ndiffuse-1}"
-            ax.set_title(title)
-            
-            # Save frame
-            plt.draw()
-            frame_filename = f"{animation_path}/frame_{frame_idx:04d}.png"
-            plt.savefig(frame_filename, dpi=100, bbox_inches='tight')
-            frame_idx += 1
-            
-            pbar.set_postfix({"step": f"{diffusion_step}"})
-    
+                # Rollout trajectory for current denoising step
+                trajectory_states = [state_init.pipeline_state]
+                state = state_init
+                
+                traj_x = [np.array(state_init.pipeline_state)[0]]
+                traj_y = [np.array(state_init.pipeline_state)[1]]
+                
+                for t in range(actions.shape[0]):
+                    action_np = np.array(actions[t])
+                    state = step_env_jit(state, actions[t])
+                    state_np = np.array(state.pipeline_state)
+                    trajectory_states.append(state_np)
+                    traj_x.append(state_np[0])
+                    traj_y.append(state_np[1])
+                
+                # Update scatter plot with colored points along trajectory
+                if len(traj_x) > 0:
+                    positions = np.column_stack([traj_x, traj_y])
+                    colors = np.arange(len(traj_x))  # Color progression along trajectory
+                    trajectory_scatter.set_offsets(positions)
+                    trajectory_scatter.set_array(colors)
+                    
+                # Update trajectory line using set_data
+                trajectory_line.set_data(traj_x, traj_y)
+                # Update opacity to show progression
+                alpha = 0.3 + 0.7 * (step / max(1, total_steps - 1))  # Gradually increase opacity
+                trajectory_line.set_alpha(alpha)
+                
+                # Update title to show current denoising step
+                diffusion_step = args.Ndiffuse - 1 - step
+                title = f"Denoising Step {diffusion_step}/{args.Ndiffuse-1}"
+                ax.set_title(title)
+                
+                # Save frame
+                plt.draw()
+                frame_filename = f"{animation_path}/frame_{frame_idx:04d}.png"
+                plt.savefig(frame_filename, dpi=100, bbox_inches='tight')
+                frame_idx += 1
+                
+                pbar.set_postfix({"step": f"{diffusion_step}"})
     plt.ioff()
     plt.close()
     
