@@ -35,9 +35,10 @@ class MBDConfig:
     enable_demo: bool = False
     # animation
     render: bool = True
-    save_animation: bool = False # flag to enable animation saving
+    save_animation: bool = True # flag to enable animation saving
     show_animation: bool = True  # flag to show animation during creation
     save_denoising_animation: bool = True  # flag to enable denoising process visualization
+    frame_skip: int = 1  # skip every other frame for denoising animation
     dt: float = 0.25
 
 
@@ -287,7 +288,7 @@ def run_diffusion(args=None, env=None):
             
         # Create denoising animation if requested
         if args.save_denoising_animation:
-            create_denoising_animation(env, Ybars, args, step_env_jit, state_init)
+            create_denoising_animation(env, Ybars, args, step_env_jit, state_init, frame_skip=args.frame_skip)
             
         
 

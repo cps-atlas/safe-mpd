@@ -247,7 +247,7 @@ class TractorTrailer2d:
         
         # Compute reward: normal reward if no collision/violation, penalty if collision/hitch violation
         reward = self.get_reward(q)
-        reward = jnp.where(collide, reward-0.05, reward) # FIXME: a magic parameter here should be fixed. It's penalizing the collision
+        reward = jnp.where(collide, reward-0.15, reward) # FIXME: a magic parameter here should be fixed. It's penalizing the collision
         
         return state.replace(pipeline_state=q, obs=q, reward=reward, done=0.0)
 

@@ -205,9 +205,9 @@ def create_animation(env, trajectory_states, trajectory_actions, args):
             rect.set_transform(transform)
             ax.add_patch(rect)
     
-    # Add reference trajectory if available
-    if hasattr(env, 'xref') and args.case == "case1":  # Only show reference for case1
-        ax.plot(env.xref[:, 0], env.xref[:, 1], "g--", alpha=0.5, label="Reference path")
+    # # Add demonstration trajectory if available
+    # if args.enable_demo and hasattr(env, 'xref') and env.xref is not None:
+    #     ax.plot(env.xref[:, 0], env.xref[:, 1], "g--", linewidth=2, label="Demonstration path", alpha=0.7)
     
     # Add start and goal markers
     ax.scatter(env.x0[0], env.x0[1], c='blue', s=150, marker='o', edgecolor='black', linewidth=2, label='Start', zorder=5)
@@ -262,7 +262,7 @@ def create_animation(env, trajectory_states, trajectory_actions, args):
         export_video(args.env_name, "trajectory")
 
 
-def create_denoising_animation(env, Yi, args, step_env_jit, state_init):
+def create_denoising_animation(env, Yi, args, step_env_jit, state_init, frame_skip=1):
     """Create animation showing the denoising process through all diffusion steps"""
     print("Creating denoising process animation...")
     
@@ -362,9 +362,9 @@ def create_denoising_animation(env, Yi, args, step_env_jit, state_init):
             rect.set_transform(transform)
             ax.add_patch(rect)
     
-    # Add reference trajectory if available
-    if hasattr(env, 'xref') and args.case == "case1":  # Only show reference for case1
-        ax.plot(env.xref[:, 0], env.xref[:, 1], "g--", alpha=0.5, label="Reference path")
+    # Add demonstration trajectory if available
+    if args.enable_demo and hasattr(env, 'xref') and env.xref is not None:
+        ax.plot(env.xref[:, 0], env.xref[:, 1], "g--", linewidth=2, label="Demonstration path", alpha=0.7)
     
     # Add start and goal markers
     ax.scatter(env.x0[0], env.x0[1], c='blue', s=150, marker='o', edgecolor='black', linewidth=2, label='Start', zorder=5)
@@ -380,7 +380,6 @@ def create_denoising_animation(env, Yi, args, step_env_jit, state_init):
     # Loop through each denoising step
     frame_idx = 0
     total_steps = Yi.shape[0]
-    frame_skip = 3  # Skip every other frame
     
     with tqdm(range(total_steps), desc="Creating denoising animation") as pbar:
         for step in pbar:
