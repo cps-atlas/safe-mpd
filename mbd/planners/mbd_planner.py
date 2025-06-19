@@ -308,7 +308,7 @@ if __name__ == "__main__":
     # Set initial position using geometric parameters relative to parking lot
     # dx: distance from tractor front face to target parking space center
     # dy: distance from tractor to parking lot entrance line
-    env.set_init_pos(dx=4.0, dy=8.0, theta1=jnp.pi/2, theta2=jnp.pi/2)
+    env.set_init_pos(dx=4.0, dy=6.0, theta1=0, theta2=0)
     
     rew_final, Y0, trajectory_states = run_diffusion(args=config, env=env)
     end_time = time.time()

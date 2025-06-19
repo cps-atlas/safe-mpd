@@ -253,7 +253,7 @@ class Env:
             print(line)
             print("-" * (cols * 4 + 1))
 
-    def set_rectangle_obs(self, obstacles, coordinate_mode="left-top"):
+    def set_rectangle_obs(self, obstacles, coordinate_mode="left-top", padding=0.0):
         """
         Set rectangular obstacles for case3 (CarMaker test case)
         
@@ -280,10 +280,10 @@ class Env:
                 # Convert from left-top to center coordinates
                 center_x = x + width / 2
                 center_y = y - height / 2  # Note: y decreases downward in CarMaker
-                converted_obstacles.append([center_x, center_y, width, height, rotation])
+                converted_obstacles.append([center_x, center_y, width+padding*2, height+padding*2, rotation])
             elif coordinate_mode == "center":
                 # Already in center coordinates
-                converted_obstacles.append([x, y, width, height, rotation])
+                converted_obstacles.append([x, y, width+padding*2, height+padding*2, rotation])
             else:
                 raise ValueError(f"coordinate_mode must be 'left-top' or 'center', got {coordinate_mode}")
         

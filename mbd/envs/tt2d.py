@@ -71,7 +71,7 @@ class TractorTrailer2d:
             self.reward_threshold = 25.0  # Larger threshold for parking scenario
             self.ref_threshold = 3.0     # Larger threshold for parking scenario
         elif case == "case3":
-            self.reward_threshold = 105.0  # Similar to case2 for CarMaker parking scenario
+            self.reward_threshold = 25.0  # Similar to case2 for CarMaker parking scenario
             self.ref_threshold = 3.0     # Similar to case2
         
         # Environment setup
@@ -143,8 +143,10 @@ class TractorTrailer2d:
         self.xref = self.xref.at[:, 2].set(theta)  # theta1
         self.xref = self.xref.at[:, 3].set(theta)  # theta2 (assume aligned initially)
         
-        print(f"Reference trajectory shape: {self.xref.shape}")
-        self.rew_xref = jax.vmap(self.get_reward)(self.xref).mean()
+        # TODO: don't use demonstration for now
+        # TODO: But very importantly, if you set the goal position after init, then you need to compile the get_reward again, otherwise it will use the default goal.
+        # print(f"Reference trajectory shape: {self.xref.shape}")
+        # self.rew_xref = jax.vmap(self.get_reward)(self.xref).mean()
 
         # Animation-related attributes
         self.tractor_body = None
@@ -204,21 +206,21 @@ class TractorTrailer2d:
         elif x is not None and y is not None:
             # Direct coordinate specification
             self.x0 = jnp.array([x, y, theta1, theta2])
+            print(f"overwrite x0: {self.x0}")
         else:
             # Default case1 values
             x = x if x is not None else -3.0
             y = y if y is not None else 0.0
             self.x0 = jnp.array([x, y, theta1, theta2])
-        print(f"overwrite x0: {self.x0}")
 
     def set_goal_pos(self, x=3.0, y=0.0, theta1=np.pi, theta2=np.pi):
         """Set goal position for tractor-trailer (case1 default)"""
         self.xg = jnp.array([x, y, theta1, theta2]) 
         print(f"overwrite xg: {self.xg}")
         
-    def set_rectangle_obs(self, rectangles, coordinate_mode="left-top"):
+    def set_rectangle_obs(self, rectangles, coordinate_mode="left-top", padding=0.0):
         """Set rectangular obstacles"""
-        self.obs_rectangles = self.env.set_rectangle_obs(rectangles, coordinate_mode=coordinate_mode)
+        self.obs_rectangles = self.env.set_rectangle_obs(rectangles, coordinate_mode=coordinate_mode, padding=padding)
 
     def reset(self, rng: jax.Array):
         """Resets the environment to an initial state."""
@@ -267,10 +269,12 @@ class TractorTrailer2d:
         collide = self.check_collision(q_new, self.obs_circles, self.obs_rectangles)
         
         # If collision, don't update the state but apply collision penalty
-        q = jnp.where(collide, q, q_new)
+        #q = jnp.where(collide, q, q_new)
+        
+        q = q_new # FIXME: no projection now
         
         # Compute reward: normal reward if no collision, collision penalty if collision
-        reward = jnp.where(collide, 0.0, self.get_reward(q))  # 0.0 is the maximum penalty
+        reward = jnp.where(collide, self.get_reward(q)/1.2, self.get_reward(q))  # 0.0 is the maximum penalty
         
         return state.replace(pipeline_state=q, obs=q, reward=reward, done=0.0)
 
@@ -289,6 +293,8 @@ class TractorTrailer2d:
         # modify the tractor_pos to be the center of the tractor
         tractor_pos           = jnp.array([px + self.l1 * jnp.cos(theta1), py + self.l1 * jnp.sin(theta1)])
         tractor_goal          = self.xg[:2]
+        
+        #jax.debug.print("tractor_goal: {x}, {y}", x=tractor_goal[0], y=tractor_goal[1])
         
         # Compute trailer position from current state
         trailer_pos = self.get_trailer_position(q)
