@@ -31,6 +31,10 @@ class Env:
             self.parking_config = parking_config
             self.obs_circle = self.set_obs_circle_case2(parking_config)
             self.obs_rectangle = self.set_obs_rectangle_case2()
+        elif case == "case3":
+            # CarMaker test case - obstacles will be set via set_rectangle_obs
+            self.obs_circle = []  # No circular obstacles for case3
+            self.obs_rectangle = []  # Will be set later via set_rectangle_obs
         else:
             raise ValueError(f"Unknown case: {case}")
             
@@ -248,3 +252,49 @@ class Env:
                 line += f" {symbol} |"
             print(line)
             print("-" * (cols * 4 + 1))
+
+    def set_rectangle_obs(self, obstacles, coordinate_mode="left-top"):
+        """
+        Set rectangular obstacles for case3 (CarMaker test case)
+        
+        Args:
+            obstacles: List of obstacles, each can be:
+                - [x, y, width, height] (4 elements, rotation = 0)
+                - [x, y, width, height, rotation] (5 elements)
+            coordinate_mode: "left-top" or "center"
+                - "left-top": x,y represent upper-left corner (CarMaker convention)
+                - "center": x,y represent center (MBD convention)
+        """
+        converted_obstacles = []
+        
+        for obs in obstacles:
+            if len(obs) == 4:
+                x, y, width, height = obs
+                rotation = 0.0
+            elif len(obs) == 5:
+                x, y, width, height, rotation = obs
+            else:
+                raise ValueError(f"Obstacle must have 4 or 5 elements, got {len(obs)}")
+            
+            if coordinate_mode == "left-top":
+                # Convert from left-top to center coordinates
+                center_x = x + width / 2
+                center_y = y - height / 2  # Note: y decreases downward in CarMaker
+                converted_obstacles.append([center_x, center_y, width, height, rotation])
+            elif coordinate_mode == "center":
+                # Already in center coordinates
+                converted_obstacles.append([x, y, width, height, rotation])
+            else:
+                raise ValueError(f"coordinate_mode must be 'left-top' or 'center', got {coordinate_mode}")
+        
+        self.obs_rectangle = np.array(converted_obstacles)
+        print(f"Set {len(converted_obstacles)} rectangular obstacles with {coordinate_mode} coordinates")
+        return self.obs_rectangle
+
+    def set_plot_limits(self, x_range, y_range):
+        """Set custom plot limits for visualization"""
+        self.x_range = x_range
+        self.y_range = y_range
+        print(f"Plot limits set to x_range: {self.x_range}, y_range: {self.y_range}")
+
+

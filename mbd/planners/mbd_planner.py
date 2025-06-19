@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from tqdm import tqdm
 from matplotlib import pyplot as plt
 import time
-import yaml
 
 import mbd
 from mbd.utils import (
@@ -23,7 +22,7 @@ from mbd.utils import (
 class MBDConfig:
     # exp
     seed: int = 0
-    not_render: bool = False
+    disable_recommended_params: bool = False
     # env
     env_name: str = "tt2d"
     case: str = "case2" # "case1" for original obstacles, "case2" for parking scenario
@@ -36,27 +35,11 @@ class MBDConfig:
     betaT: float = 1e-2  # final beta
     enable_demo: bool = False
     # animation
+    render: bool = True
     save_animation: bool = False # flag to enable animation saving
     show_animation: bool = True  # flag to show animation during creation
     save_denoising_animation: bool = False  # flag to enable denoising process visualization
     dt: float = 0.25
-
-
-def load_mbd_config(config_file=None):
-    if config_file is None:
-        # Get the directory of this file
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        # Go up two levels to reach src/model-based-diffusion/
-        mbd_root = os.path.dirname(os.path.dirname(current_dir))
-        config_file = os.path.join(mbd_root, "config.yaml")
-    
-    try:
-        with open(config_file, "r") as file:
-            config = yaml.safe_load(file)
-    except FileNotFoundError:
-        raise FileNotFoundError(f"Config file not found: {config_file}")
-    
-    return config
 
 
 def dict_to_config_obj(config_dict):
@@ -69,48 +52,46 @@ def dict_to_config_obj(config_dict):
     Returns:
         MBDConfig: Dataclass with configuration values
     """
-    # Create dataclass with values from dict, using defaults for missing keys
+    # Create dataclass with values from dict - all parameters must be provided
     # Explicitly convert types to ensure proper typing
     return MBDConfig(
-        seed=int(config_dict.get("seed", 0)),
-        not_render=bool(config_dict.get("not_render", False)),
-        env_name=str(config_dict.get("env_name", "tt2d")),
-        case=str(config_dict.get("case", "case2")),
-        Nsample=int(config_dict.get("Nsample", 20000)),
-        Hsample=int(config_dict.get("Hsample", 50)),
-        Ndiffuse=int(config_dict.get("Ndiffuse", 100)),
-        temp_sample=float(config_dict.get("temp_sample", 0.01)),
-        beta0=float(config_dict.get("beta0", 1e-4)),
-        betaT=float(config_dict.get("betaT", 1e-2)),
-        enable_demo=bool(config_dict.get("enable_demo", False)),
-        save_animation=bool(config_dict.get("save_animation", False)),
-        show_animation=bool(config_dict.get("show_animation", False)),
-        save_denoising_animation=bool(config_dict.get("save_denoising_animation", False)),
-        dt=float(config_dict.get("dt", 0.25)),
+        seed=int(config_dict["seed"]),
+        disable_recommended_params=bool(config_dict["disable_recommended_params"]),
+        render=bool(config_dict["render"]),
+        env_name=str(config_dict["env_name"]),
+        case=str(config_dict["case"]),
+        Nsample=int(config_dict["Nsample"]),
+        Hsample=int(config_dict["Hsample"]),
+        Ndiffuse=int(config_dict["Ndiffuse"]),
+        temp_sample=float(config_dict["temp_sample"]),
+        beta0=float(config_dict["beta0"]),
+        betaT=float(config_dict["betaT"]),
+        enable_demo=bool(config_dict["enable_demo"]),
+        save_animation=bool(config_dict["save_animation"]),
+        show_animation=bool(config_dict["show_animation"]),
+        save_denoising_animation=bool(config_dict["save_denoising_animation"]),
+        dt=float(config_dict["dt"]),
     )
 
 
-def run_diffusion(args=None, env=None, config_file=None):
+def run_diffusion(args=None, env=None):
     """
     Run the diffusion-based planning algorithm.
     
     Args:
         args: Configuration dictionary with diffusion parameters.
-              If None, will load from config_file.
         env: Environment object
-        config_file: Path to config file (used only if args is None)
     
     Returns:
         rew_final: Final reward value
         Y0: Final action sequence
         trajectory_states: Trajectory states
     """
-    # Handle config loading
-    if args is None:
-        config_dict = load_mbd_config(config_file)
-        args = dict_to_config_obj(config_dict)
-    elif isinstance(args, dict):
+    # Convert dictionary to dataclass if needed
+    if isinstance(args, dict):
         args = dict_to_config_obj(args)
+    elif args is None:
+        raise ValueError("args parameter is required and cannot be None")
     
     rng = jax.random.PRNGKey(seed=args.seed)
     Nx = env.observation_size
@@ -250,7 +231,7 @@ def run_diffusion(args=None, env=None, config_file=None):
         xs = jnp.concatenate([xs, state.pipeline_state[None]], axis=0)
     trajectory_states = xs
     
-    if not args.not_render:
+    if args.render:
         path = f"{mbd.__path__[0]}/../results/{args.env_name}"
         if not os.path.exists(path):
             os.makedirs(path)
@@ -313,10 +294,8 @@ if __name__ == "__main__":
     import time
     start_time = time.time()
     
-    # Load configuration from YAML and convert to dataclass
-    config_dict = load_mbd_config()
-    config = dict_to_config_obj(config_dict)
-    
+    # For standalone testing, use default config
+    config = MBDConfig()
     
     # Create environment
     env = mbd.envs.get_env(

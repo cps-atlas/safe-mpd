@@ -70,6 +70,9 @@ class TractorTrailer2d:
         elif case == "case2":
             self.reward_threshold = 25.0  # Larger threshold for parking scenario
             self.ref_threshold = 3.0     # Larger threshold for parking scenario
+        elif case == "case3":
+            self.reward_threshold = 105.0  # Similar to case2 for CarMaker parking scenario
+            self.ref_threshold = 3.0     # Similar to case2
         
         # Environment setup
         if env_config is None:
@@ -91,6 +94,9 @@ class TractorTrailer2d:
                 self.set_init_pos()
             elif case == "case2":
                 self.x0 = self.env.get_default_init_pos(case=case)
+            elif case == "case3":
+                # For case3, use default but will be overridden by set_init_pos/set_goal_pos calls
+                self.x0 = jnp.array([0.0, 0.0, 0.0, 0.0])
         else:
             self.x0 = x0
             
@@ -99,6 +105,9 @@ class TractorTrailer2d:
                 self.set_goal_pos()
             elif case == "case2":
                 self.xg = self.env.get_default_goal_pos(case=case)
+            elif case == "case3":
+                # For case3, use default but will be overridden by set_goal_pos calls
+                self.xg = jnp.array([0.0, 0.0, jnp.pi, jnp.pi])
         else:
             self.xg = xg
         
@@ -200,10 +209,16 @@ class TractorTrailer2d:
             x = x if x is not None else -3.0
             y = y if y is not None else 0.0
             self.x0 = jnp.array([x, y, theta1, theta2])
+        print(f"overwrite x0: {self.x0}")
 
     def set_goal_pos(self, x=3.0, y=0.0, theta1=np.pi, theta2=np.pi):
         """Set goal position for tractor-trailer (case1 default)"""
         self.xg = jnp.array([x, y, theta1, theta2]) 
+        print(f"overwrite xg: {self.xg}")
+        
+    def set_rectangle_obs(self, rectangles, coordinate_mode="left-top"):
+        """Set rectangular obstacles"""
+        self.obs_rectangles = self.env.set_rectangle_obs(rectangles, coordinate_mode=coordinate_mode)
 
     def reset(self, rng: jax.Array):
         """Resets the environment to an initial state."""
