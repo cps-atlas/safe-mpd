@@ -22,7 +22,6 @@ from mbd.utils import (
 class MBDConfig:
     # exp
     seed: int = 0
-    disable_recommended_params: bool = False
     # env
     env_name: str = "tt2d"
     case: str = "case2" # "case1" for original obstacles, "case2" for parking scenario
@@ -33,10 +32,10 @@ class MBDConfig:
     temp_sample: float = 0.01  # temperature for sampling
     beta0: float = 1e-4  # initial beta
     betaT: float = 1e-2  # final beta
-    enable_demo: bool = False
+    enable_demo: bool = True
     # animation
     render: bool = True
-    save_animation: bool = False # flag to enable animation saving
+    save_animation: bool = True # flag to enable animation saving
     show_animation: bool = True  # flag to show animation during creation
     save_denoising_animation: bool = False  # flag to enable denoising process visualization
     dt: float = 0.25
@@ -56,7 +55,6 @@ def dict_to_config_obj(config_dict):
     # Explicitly convert types to ensure proper typing
     return MBDConfig(
         seed=int(config_dict["seed"]),
-        disable_recommended_params=bool(config_dict["disable_recommended_params"]),
         render=bool(config_dict["render"]),
         env_name=str(config_dict["env_name"]),
         case=str(config_dict["case"]),
@@ -96,6 +94,14 @@ def run_diffusion(args=None, env=None):
     rng = jax.random.PRNGKey(seed=args.seed)
     Nx = env.observation_size
     Nu = env.action_size
+    
+    # Generate demonstration trajectory if enabled
+    if args.enable_demo:
+        # Generate demonstration trajectory
+        env.generate_demonstration_trajectory(search_direction="horizontal")
+        # Compile the reward function with the demonstration
+        env.compile_reward_function()
+        print(f"Demo trajectory generated with reward: {env.rew_xref:.3f}")
     
     # env functions
     step_env_jit = jax.jit(env.step)
@@ -165,7 +171,7 @@ def run_diffusion(args=None, env=None):
         # sample from q_i
         rng, Y0s_rng = jax.random.split(rng)
         eps_u = jax.random.normal(Y0s_rng, (args.Nsample, args.Hsample, Nu)) # NOTE: Sample from N(0, I) 
-        Y0s = eps_u * sigmas[i] + Ybar_i
+        Y0s = eps_u * sigmas[i]/jnp.sqrt(alphas_bar[i-1]) + Ybar_i
         Y0s = jnp.clip(Y0s, -1.0, 1.0) # NOTE: clip action to [-1, 1] (it is defined in dynamics)
 
         # esitimate mu_0tm1
@@ -247,8 +253,8 @@ def run_diffusion(args=None, env=None):
         fig, ax = plt.subplots(1, 1, figsize=(10, 10))
         # rollout (trajectory already computed above)
         env.render(ax, trajectory_states)
-        if args.enable_demo:
-            ax.plot(env.xref[:, 0], env.xref[:, 1], "g--", label="RRT path")
+        if args.enable_demo and hasattr(env, 'xref') and env.xref is not None:
+            ax.plot(env.xref[:, 0], env.xref[:, 1], "g--", linewidth=2, label="Demonstration path", alpha=0.7)
         ax.legend()
         
         plt.switch_backend('TkAgg')  # Switch to interactive backend
@@ -294,7 +300,7 @@ if __name__ == "__main__":
     import time
     start_time = time.time()
     
-    # For standalone testing, use default config
+    # For standalone testing, use default config with demonstration enabled
     config = MBDConfig()
     
     # Create environment
@@ -308,7 +314,7 @@ if __name__ == "__main__":
     # Set initial position using geometric parameters relative to parking lot
     # dx: distance from tractor front face to target parking space center
     # dy: distance from tractor to parking lot entrance line
-    env.set_init_pos(dx=4.0, dy=6.0, theta1=0, theta2=0)
+    env.set_init_pos(dx=14.0, dy=6.0, theta1=0, theta2=0)
     
     rew_final, Y0, trajectory_states = run_diffusion(args=config, env=env)
     end_time = time.time()

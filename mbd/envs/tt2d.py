@@ -115,38 +115,10 @@ class TractorTrailer2d:
         print(f"x0: {self.x0}")
         print(f"xg: {self.xg}")
         
-        # Load and process reference trajectory
-        xref_original = jnp.load(f"{mbd.__path__[0]}/assets/car2d_xref.npy")
-        
-        # interpolate each two points in xref to make it 100 points
-        # Interpolate xref to get 100 points by averaging consecutive points
-        xref_interp = []
-        for i in range(xref_original.shape[0]-1):
-            xref_interp.append(xref_original[i,:])
-            xref_interp.append((xref_original[i,:] + xref_original[i+1,:])/2)
-        xref_interp.append(xref_original[-1,:])
-        xref_2d = jnp.array(xref_interp)
-        
-        xref_2d = xref_original # TODO: use the original trajectory for now.
-        #print(f"xref_2d: {xref_2d}")
-        xref_2d = xref_2d * 6
-        #print(f"xref_2d: {xref_2d}")
-        
-        # Extend 2D reference to 4D state space [px, py, theta1, theta2]
-        xref_diff = jnp.diff(xref_2d, axis=0)
-        theta = jnp.arctan2(xref_diff[:, 1], xref_diff[:, 0])  # Note: y,x order for atan2
-        theta = jnp.append(theta, theta[-1])
-        
-        # Create 4D reference trajectory
-        self.xref = jnp.zeros((xref_2d.shape[0], 4))
-        self.xref = self.xref.at[:, :2].set(xref_2d)  # px, py
-        self.xref = self.xref.at[:, 2].set(theta)  # theta1
-        self.xref = self.xref.at[:, 3].set(theta)  # theta2 (assume aligned initially)
-        
-        # TODO: don't use demonstration for now
-        # TODO: But very importantly, if you set the goal position after init, then you need to compile the get_reward again, otherwise it will use the default goal.
-        # print(f"Reference trajectory shape: {self.xref.shape}")
-        # self.rew_xref = jax.vmap(self.get_reward)(self.xref).mean()
+        # Demonstration trajectory will be generated later using generate_demonstration_trajectory()
+        # This allows setting x0, xg, and obstacles before creating the demo
+        self.xref = None
+        self.rew_xref = None
 
         # Animation-related attributes
         self.tractor_body = None
@@ -265,7 +237,7 @@ class TractorTrailer2d:
         q = state.pipeline_state
         q_new = rk4(self.tractor_trailer_dynamics, state.pipeline_state, u_scaled, self.dt)
         
-        # Check collision with full geometry
+        # Check collision with full geometry and hitch angle violations
         collide = self.check_collision(q_new, self.obs_circles, self.obs_rectangles)
         
         # If collision, don't update the state but apply collision penalty
@@ -273,10 +245,205 @@ class TractorTrailer2d:
         
         q = q_new # FIXME: no projection now
         
-        # Compute reward: normal reward if no collision, collision penalty if collision
-        reward = jnp.where(collide, self.get_reward(q)/1.2, self.get_reward(q))  # 0.0 is the maximum penalty
+        # Compute reward: normal reward if no collision/violation, penalty if collision/hitch violation
+        reward = self.get_reward(q)
+        reward = jnp.where(collide, reward-1, reward)
         
         return state.replace(pipeline_state=q, obs=q, reward=reward, done=0.0)
+
+    def generate_demonstration_trajectory(self, search_direction="horizontal", num_waypoints_max=4):
+        """
+        Generate a simple demonstration trajectory from x0 to xg avoiding obstacles.
+        
+        Args:
+            search_direction: "horizontal" or "vertical" - initial search direction
+            num_waypoints_max: maximum number of waypoints to use
+            
+        Returns:
+            xref: (H+1, 4) array of reference states [px, py, theta1, theta2]
+        """
+        import numpy as np
+        
+        # Extract start and goal positions
+        x0_pos = self.x0[:2]
+        xg_pos = self.xg[:2]
+        
+        # List to store waypoints
+        waypoints = [x0_pos]
+        
+        # Helper function to check if a line segment collides with obstacles
+        def check_line_collision(p1, p2, num_samples=50):
+            """Check if line from p1 to p2 collides with any obstacle (point-based check)"""
+            # Sample points along the line
+            t_values = np.linspace(0, 1, num_samples)
+            for t in t_values:
+                point = p1 + t * (p2 - p1)
+                
+                # Check if point collides with any circular obstacles
+                for obs in self.obs_circles:
+                    obs_center = obs[:2]
+                    obs_radius = obs[2]
+                    dist = np.linalg.norm(point - obs_center)
+                    if dist <= obs_radius:
+                        print(f"Point collision detected with circle at {point}")
+                        return True
+                
+                # Check if point collides with any rectangular obstacles
+                for obs in self.obs_rectangles:
+                    obs_x, obs_y, obs_width, obs_height, obs_angle = obs
+                    
+                    # Transform point to obstacle's local coordinate system
+                    dx = point[0] - obs_x
+                    dy = point[1] - obs_y
+                    
+                    # Rotate point by -obs_angle to align with obstacle's axes
+                    cos_angle = np.cos(-obs_angle)
+                    sin_angle = np.sin(-obs_angle)
+                    local_x = dx * cos_angle - dy * sin_angle
+                    local_y = dx * sin_angle + dy * cos_angle
+                    
+                    # Check if point is inside rectangle bounds
+                    if (abs(local_x) <= obs_width / 2 and abs(local_y) <= obs_height / 2):
+                        print(f"Point collision detected with rectangle at {point}")
+                        return True
+            
+            return False
+        
+        # Try direct path first
+        if not check_line_collision(x0_pos, xg_pos):
+            # Direct path is clear
+            print("Direct path is clear")
+            waypoints.append(xg_pos)
+        else:
+            # Need intermediate waypoints - use perpendicular approach
+            if search_direction == "horizontal":
+                # Go horizontally first (change x, keep y), then vertically (change y, keep x)
+                intermediate = jnp.array([xg_pos[0], x0_pos[1]])
+            else:
+                # Go vertically first (change y, keep x), then horizontally (change x, keep y)
+                intermediate = jnp.array([x0_pos[0], xg_pos[1]])
+            
+            # Check if this perpendicular path is collision-free
+            if not check_line_collision(x0_pos, intermediate) and \
+               not check_line_collision(intermediate, xg_pos):
+                waypoints.append(intermediate)
+                waypoints.append(xg_pos)
+                print("Perpendicular path is clear")
+            else:
+                # Try the other direction
+                if search_direction == "horizontal":
+                    intermediate = jnp.array([x0_pos[0], xg_pos[1]])
+                else:
+                    intermediate = jnp.array([xg_pos[0], x0_pos[1]])
+                
+                if not check_line_collision(x0_pos, intermediate) and \
+                   not check_line_collision(intermediate, xg_pos):
+                    waypoints.append(intermediate)
+                    waypoints.append(xg_pos)
+                else:
+                    # If both perpendicular paths fail, just go direct (will have collision)
+                    waypoints.append(xg_pos)
+        
+        # Limit number of waypoints
+        if len(waypoints) > num_waypoints_max:
+            # Keep start, goal, and evenly spaced intermediate points
+            indices = np.linspace(0, len(waypoints)-1, num_waypoints_max, dtype=int)
+            waypoints = [waypoints[i] for i in indices]
+        
+        # Convert waypoints to numpy array for easier manipulation
+        waypoints = np.array(waypoints)
+        print(f"waypoints: {waypoints}")
+        
+        # Calculate total path length
+        path_lengths = []
+        total_length = 0.0
+        for i in range(len(waypoints)-1):
+            segment_length = np.linalg.norm(waypoints[i+1] - waypoints[i])
+            path_lengths.append(segment_length)
+            total_length += segment_length
+        
+        # Discretize path into H+1 points
+        num_points = self.H 
+        points_2d = []
+        
+        # Calculate how many points per segment based on length
+        if total_length > 0:
+            points_per_segment = []
+            for length in path_lengths:
+                n_points = max(2, int(np.round(num_points * length / total_length)))
+                points_per_segment.append(n_points)
+            
+            # Adjust to ensure we have exactly H+1 points
+            current_total = sum(points_per_segment)
+            if current_total != num_points:
+                # Adjust the longest segment
+                max_idx = np.argmax(points_per_segment)
+                points_per_segment[max_idx] += num_points - current_total
+            
+            # Generate points along each segment
+            for i in range(len(waypoints)-1):
+                n_pts = points_per_segment[i]
+                # Don't include the last point of each segment (except the final one)
+                # to avoid duplicates
+                if i < len(waypoints)-2:
+                    t_values = np.linspace(0, 1, n_pts, endpoint=False)
+                else:
+                    t_values = np.linspace(0, 1, n_pts, endpoint=True)
+                
+                for t in t_values:
+                    point = waypoints[i] + t * (waypoints[i+1] - waypoints[i])
+                    points_2d.append(point)
+        else:
+            # All waypoints are the same, just repeat
+            points_2d = [waypoints[0] for _ in range(num_points)]
+        
+        # Ensure we have exactly H+1 points
+        points_2d = np.array(points_2d)
+        if len(points_2d) > num_points:
+            # Downsample
+            indices = np.linspace(0, len(points_2d)-1, num_points, dtype=int)
+            points_2d = points_2d[indices]
+        elif len(points_2d) < num_points:
+            # Pad with goal position
+            padding = num_points - len(points_2d)
+            points_2d = np.vstack([points_2d, np.tile(xg_pos, (padding, 1))])
+        
+        # Calculate heading angles based on path direction
+        xref = np.zeros((num_points, 4))
+        xref[:, :2] = points_2d  # px, py
+        
+        # Calculate heading angles from consecutive points
+        for i in range(num_points-1):
+            dx = points_2d[i+1, 0] - points_2d[i, 0]
+            dy = points_2d[i+1, 1] - points_2d[i, 1]
+            if np.abs(dx) > 1e-6 or np.abs(dy) > 1e-6:
+                theta = np.arctan2(dy, dx)
+            else:
+                # No movement, keep previous angle or use goal angle
+                theta = xref[i-1, 2] if i > 0 else self.xg[2]
+            xref[i, 2] = theta  # theta1
+            xref[i, 3] = theta  # theta2 (assume aligned)
+        
+        # Last point uses goal angles
+        xref[-1, 2] = self.xg[2]
+        xref[-1, 3] = self.xg[3]
+        
+        # Convert to jax array
+        self.xref = jnp.array(xref)
+        
+        return self.xref
+    
+    def compile_reward_function(self):
+        """
+        Compile the reward function after setting x0, xg, and obstacles.
+        This should be called after initialization and any updates to goal/start positions.
+        """
+        if hasattr(self, 'xref') and self.xref is not None:
+            # Compute reference trajectory reward
+            self.rew_xref = jax.vmap(self.get_reward)(self.xref).mean()
+            print(f"Reference trajectory reward compiled: {self.rew_xref:.3f}")
+        else:
+            print("Warning: No reference trajectory set. Call generate_demonstration_trajectory first.")
 
     @partial(jax.jit, static_argnums=(0,))
     def get_reward(self, q):
@@ -487,13 +654,22 @@ class TractorTrailer2d:
 
     @partial(jax.jit, static_argnums=(0,))
     def check_collision(self, x, obs_circles, obs_rectangles):
-        """Check collision with full tractor-trailer geometry against all obstacles"""
+        """Check collision with full tractor-trailer geometry against all obstacles and hitch angle violations"""
+        px, py, theta1, theta2 = x
+        
+        # Check hitch angle violation (jack-knifing prevention)
+        wrap_pi = lambda a: (a + jnp.pi) % (2.*jnp.pi) - jnp.pi
+        hitch_angle = wrap_pi(theta1 - theta2)
+        hitch_violation = jnp.abs(hitch_angle) > self.phi_max
+        
+        #jax.debug.print("hitch angle first element:", hitch_angle) # FIXME:
+        
         # Get tractor and trailer geometry
         geometry = self.get_tractor_trailer_rectangles(x)
         tractor_corners = geometry['tractor_corners']
         trailer_corners = geometry['trailer_corners']
         
-        collision = False
+        collision = hitch_violation  # Start with hitch angle violation
         
         # Check circular obstacles
         if obs_circles.shape[0] > 0:
@@ -555,14 +731,22 @@ class TractorTrailer2d:
         
         return collision
 
-    @partial(jax.jit, static_argnums=(0,))
     def eval_xref_logpd(self, xs):
         """Evaluate log probability density with respect to reference trajectory"""
-        xs_err = xs[:, :2] - self.xref[:, :2]
-        logpd = 0.0-(
-            (jnp.clip(jnp.linalg.norm(xs_err, axis=-1), 0.0, self.ref_threshold) / self.ref_threshold) ** 2
-        ).mean(axis=-1)
-        return logpd # NOTE: unnormalized logpd, log p_demo(Y0) in the paper.
+        # Check if reference trajectory is set
+        if self.xref is None or not hasattr(self, 'xref'):
+            return 0.0
+        
+        # JIT-compile the actual computation
+        @jax.jit
+        def _eval_xref_logpd(xs, xref, ref_threshold):
+            xs_err = xs[:, :2] - xref[:, :2]
+            logpd = 0.0-(
+                (jnp.clip(jnp.linalg.norm(xs_err, axis=-1), 0.0, ref_threshold) / ref_threshold) ** 2
+            ).mean(axis=-1)
+            return logpd
+        
+        return _eval_xref_logpd(xs, self.xref, self.ref_threshold)
 
     @property
     def action_size(self):
