@@ -28,16 +28,16 @@ class MBDConfig:
     # diffusion
     Nsample: int = 20000  # number of samples
     Hsample: int = 50  # horizon
-    Ndiffuse: int = 100  # number of diffusion steps
+    Ndiffuse: int = 100 # number of diffusion steps
     temp_sample: float = 0.01  # temperature for sampling
-    beta0: float = 1e-4  # initial beta
+    beta0: float = 1e-5  # initial beta
     betaT: float = 1e-2  # final beta
-    enable_demo: bool = True
+    enable_demo: bool = False
     # animation
     render: bool = True
     save_animation: bool = False # flag to enable animation saving
     show_animation: bool = True  # flag to show animation during creation
-    save_denoising_animation: bool = False  # flag to enable denoising process visualization
+    save_denoising_animation: bool = True  # flag to enable denoising process visualization
     dt: float = 0.25
 
 
@@ -267,10 +267,6 @@ def run_diffusion(args=None, env=None):
         if args.show_animation or args.save_denoising_animation:
             plt.close(fig)
         
-        # Create denoising animation if requested
-        if args.save_denoising_animation:
-            create_denoising_animation(env, Ybars, args, step_env_jit, state_init)
-            
         # Create animation if requested
         if args.save_animation or args.show_animation:
             # Prepare trajectory data for animation
@@ -288,6 +284,11 @@ def run_diffusion(args=None, env=None):
             
             # Create animation
             create_animation(env, trajectory_states_list, trajectory_actions, args)
+            
+        # Create denoising animation if requested
+        if args.save_denoising_animation:
+            create_denoising_animation(env, Ybars, args, step_env_jit, state_init)
+            
         
 
     rewss_final, _ = rollout_us_jit(state_init, Y0)  # Use Y0

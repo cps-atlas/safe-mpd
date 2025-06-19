@@ -247,7 +247,7 @@ class TractorTrailer2d:
         
         # Compute reward: normal reward if no collision/violation, penalty if collision/hitch violation
         reward = self.get_reward(q)
-        reward = jnp.where(collide, reward-1.0, reward) # FIXME: a magic parameter here should be fixed. It's penalizing the collision
+        reward = jnp.where(collide, reward-0.05, reward) # FIXME: a magic parameter here should be fixed. It's penalizing the collision
         
         return state.replace(pipeline_state=q, obs=q, reward=reward, done=0.0)
 
@@ -513,7 +513,7 @@ class TractorTrailer2d:
         sigmoid  = lambda z: 1.0 / (1.0 + jnp.exp(-z))
         w_theta = sigmoid((self.d_thr - d_pos) / self.k_switch)      # ∈ (0,1)
         # set upper bound on w_theta
-        w_theta = jnp.clip(w_theta, 0.0, 0.85) # prevent dropping off all the position reward # FIXME: magic parameter. Works from 0.7 - 0.85
+        w_theta = jnp.clip(w_theta, 0.0, 0.75) # prevent dropping off all the position reward # FIXME: magic parameter. Works from 0.7 - 0.85
 
         # ---------------------------------------------------------------
         # 5. weighted stage cost
@@ -772,9 +772,9 @@ class TractorTrailer2d:
             
             # Combined logpd with weights
             # Position gets more weight than individual angles
-            pos_weight = 0.8
-            theta1_weight = 0.1
-            theta2_weight = 0.1
+            pos_weight = 0.6
+            theta1_weight = 0.2
+            theta2_weight = 0.2
             
             combined_logpd = (pos_weight * pos_logpd + 
                             theta1_weight * theta1_logpd + 
@@ -782,7 +782,7 @@ class TractorTrailer2d:
             
             return combined_logpd.mean(axis=-1)
         
-        return _eval_xref_logpd(xs, self.xref, 15.0, jnp.deg2rad(90.0)) # FIXME: magic parameter
+        return _eval_xref_logpd(xs, self.xref, 5.0, jnp.deg2rad(50.0)) # FIXME: magic parameter
 
     @property
     def action_size(self):
