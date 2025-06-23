@@ -32,13 +32,15 @@ class MBDConfig:
     temp_sample: float = 0.01  # temperature for sampling
     beta0: float = 1e-5  # initial beta
     betaT: float = 1e-2  # final beta
-    enable_demo: bool = False
+    enable_demo: bool = True
+    # movement preference
+    movement_preference: int = -1  # 0=none, 1=forward, -1=backward # FIXME: need to test backward with real backward initial pose
     # animation
     render: bool = True
-    save_animation: bool = True # flag to enable animation saving
+    save_animation: bool = False # flag to enable animation saving
     show_animation: bool = True  # flag to show animation during creation
-    save_denoising_animation: bool = True  # flag to enable denoising process visualization
-    frame_skip: int = 1  # skip every other frame for denoising animation
+    save_denoising_animation: bool = False  # flag to enable denoising process visualization
+    frame_skip: int = 3  # skip every other frame for denoising animation
     dt: float = 0.25
 
 
@@ -66,6 +68,7 @@ def dict_to_config_obj(config_dict):
         beta0=float(config_dict["beta0"]),
         betaT=float(config_dict["betaT"]),
         enable_demo=bool(config_dict["enable_demo"]),
+        movement_preference=int(config_dict.get("movement_preference", 0)),
         save_animation=bool(config_dict["save_animation"]),
         show_animation=bool(config_dict["show_animation"]),
         save_denoising_animation=bool(config_dict["save_denoising_animation"]),
@@ -99,7 +102,7 @@ def run_diffusion(args=None, env=None):
     # Generate demonstration trajectory if enabled
     if args.enable_demo:
         # Generate demonstration trajectory
-        env.generate_demonstration_trajectory(search_direction="horizontal")
+        env.generate_demonstration_trajectory(search_direction="horizontal", movement_preference=args.movement_preference)
         # Compile the reward function with the demonstration
         env.compile_reward_function()
         print(f"Demo trajectory generated with reward: {env.rew_xref:.3f}")
@@ -190,7 +193,7 @@ def run_diffusion(args=None, env=None):
 
         # evalulate demo
         if args.enable_demo:
-            xref_logpds = jax.vmap(env.eval_xref_logpd)(qs)
+            xref_logpds = jax.vmap(lambda q: env.eval_xref_logpd(q, movement_preference=args.movement_preference))(qs)
             xref_logpds = xref_logpds - xref_logpds.max() # FIXME: without - max, it can deviate from the demo if necessary !!
             logpdemo = (
                 (xref_logpds + env.rew_xref - rew_mean) / rew_std / args.temp_sample
@@ -310,7 +313,8 @@ if __name__ == "__main__":
         config.env_name, 
         case=config.case, 
         dt=config.dt, 
-        H=config.Hsample
+        H=config.Hsample,
+        movement_preference=config.movement_preference
     )
     
     # Set initial position using geometric parameters relative to parking lot
