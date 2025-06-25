@@ -217,7 +217,7 @@ def run_diffusion(args=None, env=None):
         # evalulate demo
         if args.enable_demo:
             xref_logpds = jax.vmap(lambda q: env.eval_xref_logpd(q, movement_preference=args.movement_preference))(qs)
-            xref_logpds = xref_logpds - xref_logpds.max() # FIXME: without - max, it can deviate from the demo if necessary !!
+            xref_logpds = xref_logpds - xref_logpds.max()
             logpdemo = (
                 (xref_logpds + env.rew_xref - rew_mean) / rew_std / args.temp_sample
             )
