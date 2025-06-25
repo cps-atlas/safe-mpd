@@ -1,7 +1,7 @@
 from .car2d import Car2d
 from .tt2d import TractorTrailer2d
 
-def get_env(env_name: str, case: str = "case1", dt=0.2, H=50, movement_preference=0, 
+def get_env(env_name: str, case: str = "case1", dt=0.2, H=50, motion_preference=0, 
             collision_penalty=0.15, enable_collision_projection=False, hitch_penalty=0.10, 
             enable_hitch_projection=True, reward_threshold=25.0, ref_reward_threshold=5.0,
             max_w_theta=0.75, hitch_angle_weight=0.2, l1=3.23, l2=2.9, lh=1.15, 
@@ -11,7 +11,7 @@ def get_env(env_name: str, case: str = "case1", dt=0.2, H=50, movement_preferenc
     if env_name == "car2d":
         return Car2d()
     elif env_name == "tt2d":
-        return TractorTrailer2d(case=case, dt=dt, H=H, movement_preference=movement_preference, 
+        return TractorTrailer2d(case=case, dt=dt, H=H, motion_preference=motion_preference, 
                                collision_penalty=collision_penalty, enable_collision_projection=enable_collision_projection,
                                hitch_penalty=hitch_penalty, enable_hitch_projection=enable_hitch_projection,
                                reward_threshold=reward_threshold, ref_reward_threshold=ref_reward_threshold,

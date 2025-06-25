@@ -34,7 +34,7 @@ class MBDConfig:
     betaT: float = 1e-2  # final beta
     enable_demo: bool = True
     # movement preference
-    movement_preference: int = 1  # 0=none, 1=forward, -1=backward
+    motion_preference: int = 1  # 0=none, 1=forward, -1=backward
     # collision handling
     collision_penalty: float = 0.15  # penalty applied for obstacle collisions
     enable_collision_projection: bool = True  # whether to project state back on obstacle collision
@@ -97,7 +97,7 @@ def dict_to_config_obj(config_dict):
         beta0=float(config_dict["beta0"]),
         betaT=float(config_dict["betaT"]),
         enable_demo=bool(config_dict["enable_demo"]),
-        movement_preference=int(config_dict.get("movement_preference", 0)),
+        motion_preference=int(config_dict.get("motion_preference", 0)),
         collision_penalty=float(config_dict.get("collision_penalty", 0.15)),
         enable_collision_projection=bool(config_dict.get("enable_collision_projection", False)),
         hitch_penalty=float(config_dict.get("hitch_penalty", 0.10)),
@@ -157,7 +157,7 @@ def run_diffusion(args=None, env=None):
     # Generate demonstration trajectory if enabled
     if args.enable_demo:
         # Generate demonstration trajectory
-        env.generate_demonstration_trajectory(search_direction="horizontal", movement_preference=args.movement_preference)
+        env.generate_demonstration_trajectory(search_direction="horizontal", motion_preference=args.motion_preference)
         # Compile the reward function with the demonstration
         env.compile_reward_function()
         print(f"Demo trajectory generated with reward: {env.rew_xref:.3f}")
@@ -248,7 +248,7 @@ def run_diffusion(args=None, env=None):
 
         # evalulate demo
         if args.enable_demo:
-            xref_logpds = jax.vmap(lambda q: env.eval_xref_logpd(q, movement_preference=args.movement_preference))(qs)
+            xref_logpds = jax.vmap(lambda q: env.eval_xref_logpd(q, motion_preference=args.motion_preference))(qs)
             xref_logpds = xref_logpds - xref_logpds.max()
             logpdemo = (
                 (xref_logpds + env.rew_xref - rew_mean) / rew_std / args.temp_sample
@@ -369,7 +369,7 @@ if __name__ == "__main__":
         case=config.case, 
         dt=config.dt, 
         H=config.Hsample,
-        movement_preference=config.movement_preference,
+        motion_preference=config.motion_preference,
         collision_penalty=config.collision_penalty,
         enable_collision_projection=config.enable_collision_projection,
         hitch_penalty=config.hitch_penalty,
@@ -402,8 +402,8 @@ if __name__ == "__main__":
     # dx: distance from tractor front face to target parking space center
     # dy: distance from tractor to parking lot entrance line
     env.set_init_pos(dx=4.0, dy=6.0, theta1=0, theta2=0)
-    # Set goal angles based on movement preference
-    if config.movement_preference == -1:  # backward parking
+    # Set goal angles based on motion preference
+    if config.motion_preference == -1:  # backward parking
         env.set_goal_pos(theta1=jnp.pi/2, theta2=jnp.pi/2)  # backward parking
     
     rew_final, Y0, trajectory_states = run_diffusion(args=config, env=env)

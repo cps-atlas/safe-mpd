@@ -40,7 +40,7 @@ class TractorTrailer2d:
     Action: [v, delta] - velocity and steering angle
     Input constraint: v ∈ [-1, 1], delta ∈ [-55°, 55°]
     """
-    def __init__(self, x0=None, xg=None, env_config=None, case="case1", dt=0.2, H=50, movement_preference=0, 
+    def __init__(self, x0=None, xg=None, env_config=None, case="case1", dt=0.2, H=50, motion_preference=0, 
                  collision_penalty=0.15, enable_collision_projection=False, hitch_penalty=0.10, 
                  enable_hitch_projection=True, reward_threshold=25.0, ref_reward_threshold=5.0,
                  max_w_theta=0.75, hitch_angle_weight=0.2, l1=3.23, l2=2.9, lh=1.15, 
@@ -51,8 +51,8 @@ class TractorTrailer2d:
         self.dt = dt
         self.H = H
         
-        # Movement preference: 0=none, 1=forward, -1=backward
-        self.movement_preference = movement_preference
+        # motion preference: 0=none, 1=forward, -1=backward
+        self.motion_preference = motion_preference
         
         # Collision handling parameters
         self.collision_penalty = collision_penalty
@@ -88,7 +88,7 @@ class TractorTrailer2d:
         self.d_thr = d_thr_factor * (self.l1 + self.lh + self.l2)  # 'one rig length'
         self.k_switch = k_switch             # [m] slope of logistic switch
         self.steering_weight = steering_weight  # weight for trajectory-level steering cost
-        self.preference_penalty_weight = preference_penalty_weight  # penalty weight for movement preference
+        self.preference_penalty_weight = preference_penalty_weight  # penalty weight for motion preference
         self.heading_reward_weight = heading_reward_weight  # weight for heading reward calculation
         
 
@@ -291,10 +291,10 @@ class TractorTrailer2d:
         reward = jnp.where(obstacle_collision, reward - self.collision_penalty, reward)
         reward = jnp.where(hitch_violation, reward - self.hitch_penalty, reward)
         
-        # Add preference penalty based on movement direction
+        # Add preference penalty based on motion direction
         # Use JAX conditional operations instead of Python if
         preference_penalty = self.get_preference_penalty(u_scaled)
-        has_preference = self.movement_preference != 0
+        has_preference = self.motion_preference != 0
         reward = jnp.where(has_preference, reward - preference_penalty, reward)
         
         return state.replace(pipeline_state=q, obs=q, reward=reward, done=0.0)
@@ -323,8 +323,8 @@ class TractorTrailer2d:
         no_penalty = 0.0
         
         # Select penalty based on preference using JAX conditionals
-        is_forward_pref = self.movement_preference == 1
-        is_backward_pref = self.movement_preference == -1
+        is_forward_pref = self.motion_preference == 1
+        is_backward_pref = self.motion_preference == -1
         
         # Use nested jnp.where to handle three cases
         penalty = jnp.where(is_forward_pref, forward_penalty,
@@ -332,7 +332,7 @@ class TractorTrailer2d:
             
         return penalty
 
-    def generate_demonstration_trajectory(self, search_direction="horizontal", num_waypoints_max=4, movement_preference=0):
+    def generate_demonstration_trajectory(self, search_direction="horizontal", num_waypoints_max=4, motion_preference=0):
         """
         Generate a simple demonstration trajectory from x0 to xg avoiding obstacles.
         
@@ -560,7 +560,7 @@ class TractorTrailer2d:
         # 1. positional reward - use different position based on preference
         # Forward preference: track tractor position
         # Backward/None preference: track trailer position
-        use_tractor_tracking = self.movement_preference == 1
+        use_tractor_tracking = self.motion_preference == 1
         
         # Compute distances for both cases
         d_pos_tractor = jnp.linalg.norm(tractor_pos - tractor_goal)
@@ -575,7 +575,7 @@ class TractorTrailer2d:
         # 2. heading-to-goal alignment  r_hdg
         wrap_pi = lambda a: (a + jnp.pi) % (2.*jnp.pi) - jnp.pi
         
-        # Handle angle errors based on movement preference:
+        # Handle angle errors based on motion preference:
         # - No preference (0): Use angle wrapping to find best orientation (direct vs π-offset)
         # - Has preference (±1): Goal angles are manually set correctly, use direct difference
         # Compute both direct and offset angle errors
@@ -595,7 +595,7 @@ class TractorTrailer2d:
         e_theta2_wrapped = jnp.where(use_direct, e_theta2_direct, e_theta2_offset)
         
         # Select final angles: use wrapping only when no preference, direct otherwise
-        no_preference = self.movement_preference == 0
+        no_preference = self.motion_preference == 0
         e_theta1 = jnp.where(no_preference, e_theta1_wrapped, e_theta1_direct)
         e_theta2 = jnp.where(no_preference, e_theta2_wrapped, e_theta2_direct)
 
@@ -840,19 +840,19 @@ class TractorTrailer2d:
         hitch_violation = self.check_hitch_violation(x)
         return obstacle_collision | hitch_violation
 
-    def eval_xref_logpd(self, xs, movement_preference=None):
+    def eval_xref_logpd(self, xs, motion_preference=None):
         """Evaluate log probability density with respect to reference trajectory"""
         # Check if reference trajectory is set
         if self.xref is None or not hasattr(self, 'xref'):
             return 0.0
         
         # Use provided preference or default to instance preference
-        if movement_preference is None:
-            movement_preference = self.movement_preference
+        if motion_preference is None:
+            motion_preference = self.motion_preference
         
         # JIT-compile the actual computation
         @jax.jit
-        def _eval_xref_logpd(xs, xref, ref_threshold, phi_max, movement_preference, ref_pos_weight, ref_theta1_weight, ref_theta2_weight):
+        def _eval_xref_logpd(xs, xref, ref_threshold, phi_max, motion_preference, ref_pos_weight, ref_theta1_weight, ref_theta2_weight):
             # Position error - use different reference points based on preference
             # Use JAX conditional operations instead of Python if statements
             
@@ -864,7 +864,7 @@ class TractorTrailer2d:
             xs_trailer = jax.vmap(self.get_trailer_position)(xs)
             
             # Select position based on preference using jnp.where
-            use_tractor = movement_preference == 1
+            use_tractor = motion_preference == 1
             xs_pos = jnp.where(use_tractor, xs_tractor, xs_trailer)
             
             xs_pos_err = xs_pos - ref_pos
@@ -892,13 +892,13 @@ class TractorTrailer2d:
             theta2_err_wrapped = jnp.where(use_direct, theta2_err_direct, theta2_err_offset)
             
             # Select final angles: use wrapping only when no preference, direct otherwise
-            no_preference = movement_preference == 0
+            no_preference = motion_preference == 0
             theta1_err = jnp.where(no_preference, theta1_err_wrapped, theta1_err_direct)
             theta2_err = jnp.where(no_preference, theta2_err_wrapped, theta2_err_direct)
             
             
             # Select final angles: use wrapping only when no preference, direct otherwise
-            no_preference = movement_preference == 0
+            no_preference = motion_preference == 0
             theta1_err = jnp.where(no_preference, theta1_err_wrapped, theta1_err_direct)
             theta2_err = jnp.where(no_preference, theta2_err_wrapped, theta2_err_direct)
             
@@ -912,7 +912,7 @@ class TractorTrailer2d:
             
             return combined_logpd.mean(axis=-1)
         
-        return _eval_xref_logpd(xs, self.xref, self.ref_reward_threshold, self.phi_max, movement_preference, 
+        return _eval_xref_logpd(xs, self.xref, self.ref_reward_threshold, self.phi_max, motion_preference, 
                                self.ref_pos_weight, self.ref_theta1_weight, self.ref_theta2_weight)
 
     @property
