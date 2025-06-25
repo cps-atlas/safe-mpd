@@ -43,7 +43,10 @@ class TractorTrailer2d:
     def __init__(self, x0=None, xg=None, env_config=None, case="case1", dt=0.2, H=50, movement_preference=0, 
                  collision_penalty=0.15, enable_collision_projection=False, hitch_penalty=0.10, 
                  enable_hitch_projection=True, reward_threshold=25.0, ref_reward_threshold=5.0,
-                 max_w_theta=0.75, ref_pos_weight=0.3, ref_theta1_weight=0.5, ref_theta2_weight=0.2):
+                 max_w_theta=0.75, hitch_angle_weight=0.2, l1=3.23, l2=2.9, lh=1.15, 
+                 tractor_width=2.0, trailer_width=2.5, v_max=3.0, delta_max_deg=55.0,
+                 d_thr_factor=1.0, k_switch=2.5, steering_weight=0.05, preference_penalty_weight=0.05,
+                 heading_reward_weight=0.5, ref_pos_weight=0.3, ref_theta1_weight=0.5, ref_theta2_weight=0.2):
         # Time parameters
         self.dt = dt
         self.H = H
@@ -61,29 +64,32 @@ class TractorTrailer2d:
         self.reward_threshold = reward_threshold
         self.ref_reward_threshold = ref_reward_threshold
         self.max_w_theta = max_w_theta
+        self.hitch_angle_weight = hitch_angle_weight
         
         # Demonstration evaluation weights
         self.ref_pos_weight = ref_pos_weight
         self.ref_theta1_weight = ref_theta1_weight
         self.ref_theta2_weight = ref_theta2_weight
         
-        # Tractor-trailer parameters
-        self.l1 = 3.23  # tractor wheelbase
-        self.l2 = 2.9   # trailer length
-        self.lh = 1.15  # hitch length
-        self.tractor_width = 2.0
-        self.trailer_width = 2.5
+        # Tractor-trailer parameters (configurable)
+        self.l1 = l1  # tractor wheelbase
+        self.l2 = l2   # trailer length
+        self.lh = lh  # hitch length
+        self.tractor_width = tractor_width
+        self.trailer_width = trailer_width
         
-        # Input constraints
-        self.v_max = 3.0  # velocity limit
-        self.delta_max = 55.0 * jnp.pi / 180.0  # steering angle limit in radians
+        # Input constraints (configurable)
+        self.v_max = v_max  # velocity limit
+        self.delta_max = delta_max_deg * jnp.pi / 180.0  # steering angle limit in radians
         
-        # --- reward-shaping hyper-parameters ----------------------
+        # --- reward-shaping hyper-parameters (configurable) ----------------------
         self.theta_max = jnp.pi / 2          # 90° cap in rad
-        self.phi_max = jnp.deg2rad(40.0)     # 30° cap for articulation
-        self.d_thr = 1.0 * (self.l1 + self.lh + self.l2)  # 'one rig length'
-        self.k_switch = 2.5                  # [m] slope of logistic switch
-        self.steering_weight = 0.05          # weight for trajectory-level steering cost
+        self.phi_max = jnp.deg2rad(40.0)     # 40° cap for articulation
+        self.d_thr = d_thr_factor * (self.l1 + self.lh + self.l2)  # 'one rig length'
+        self.k_switch = k_switch             # [m] slope of logistic switch
+        self.steering_weight = steering_weight  # weight for trajectory-level steering cost
+        self.preference_penalty_weight = preference_penalty_weight  # penalty weight for movement preference
+        self.heading_reward_weight = heading_reward_weight  # weight for heading reward calculation
         
 
         
@@ -305,7 +311,7 @@ class TractorTrailer2d:
             penalty: small penalty for non-preferred movement direction
         """
         v, delta = u
-        penalty_weight = 0.05  # Increased penalty weight for stronger preference enforcement
+        penalty_weight = self.preference_penalty_weight  # Configurable penalty weight for stronger preference enforcement
         
         # Forward preference penalty (penalize backward movement)
         forward_penalty = jnp.where(v < 0, penalty_weight * jnp.abs(v), 0.0)
@@ -593,7 +599,7 @@ class TractorTrailer2d:
         e_theta1 = jnp.where(no_preference, e_theta1_wrapped, e_theta1_direct)
         e_theta2 = jnp.where(no_preference, e_theta2_wrapped, e_theta2_direct)
 
-        r_hdg = 0.5 * ( 1.0 - (jnp.abs(e_theta1) / self.theta_max) ** 2
+        r_hdg = self.heading_reward_weight * ( 1.0 - (jnp.abs(e_theta1) / self.theta_max) ** 2
                       + 1.0 - (jnp.abs(e_theta2) / self.theta_max) ** 2 )
 
         # ---------------------------------------------------------------
@@ -610,7 +616,7 @@ class TractorTrailer2d:
 
         # ---------------------------------------------------------------
         # 5. weighted stage cost
-        reward = 0.8*((1.0 - w_theta) * r_pos + w_theta * r_hdg) + 0.2 * r_art
+        reward = (1.0 - self.hitch_angle_weight)*((1.0 - w_theta) * r_pos + w_theta * r_hdg) + self.hitch_angle_weight * r_art
         return reward
 
     

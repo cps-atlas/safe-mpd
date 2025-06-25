@@ -28,7 +28,7 @@ class MBDConfig:
     # diffusion
     Nsample: int = 20000  # number of samples
     Hsample: int = 50  # horizon
-    Ndiffuse: int = 100 # number of diffusion steps
+    Ndiffuse: int = 150 # number of diffusion steps
     temp_sample: float = 0.01  # temperature for sampling
     beta0: float = 1e-5  # initial beta
     betaT: float = 1e-2  # final beta
@@ -44,6 +44,22 @@ class MBDConfig:
     reward_threshold: float = 25.0  # position error threshold for main reward function
     ref_reward_threshold: float = 10.0  # position error threshold for demonstration evaluation
     max_w_theta: float = 0.75  # maximum weight for heading reward vs position reward
+    hitch_angle_weight: float = 0.2  # weight for hitch angle (articulation) reward
+    # physical parameters
+    l1: float = 3.23  # tractor wheelbase
+    l2: float = 2.9   # trailer length
+    lh: float = 1.15  # hitch length
+    tractor_width: float = 2.0  # tractor width
+    trailer_width: float = 2.5  # trailer width
+    # input constraints
+    v_max: float = 3.0  # velocity limit
+    delta_max_deg: float = 55.0  # steering angle limit in degrees
+    # reward shaping parameters
+    d_thr_factor: float = 1.0  # multiplier for distance threshold (multiplied by rig length)
+    k_switch: float = 2.5  # slope of logistic switch for position/heading reward blending
+    steering_weight: float = 0.05  # weight for trajectory-level steering cost
+    preference_penalty_weight: float = 0.05  # penalty weight for movement preference
+    heading_reward_weight: float = 0.5  # (should be 0.5 always) weight for heading reward calculation
     # demonstration evaluation weights
     ref_pos_weight: float = 0.3  # position weight in demo evaluation
     ref_theta1_weight: float = 0.35  # theta1 weight in demo evaluation  
@@ -89,6 +105,22 @@ def dict_to_config_obj(config_dict):
         reward_threshold=float(config_dict.get("reward_threshold", 25.0)),
         ref_reward_threshold=float(config_dict.get("ref_reward_threshold", 5.0)),
         max_w_theta=float(config_dict.get("max_w_theta", 0.75)),
+        hitch_angle_weight=float(config_dict.get("hitch_angle_weight", 0.2)),
+        # physical parameters
+        l1=float(config_dict.get("l1", 3.23)),
+        l2=float(config_dict.get("l2", 2.9)),
+        lh=float(config_dict.get("lh", 1.15)),
+        tractor_width=float(config_dict.get("tractor_width", 2.0)),
+        trailer_width=float(config_dict.get("trailer_width", 2.5)),
+        # input constraints
+        v_max=float(config_dict.get("v_max", 3.0)),
+        delta_max_deg=float(config_dict.get("delta_max_deg", 55.0)),
+        # reward shaping parameters
+        d_thr_factor=float(config_dict.get("d_thr_factor", 1.0)),
+        k_switch=float(config_dict.get("k_switch", 2.5)),
+        steering_weight=float(config_dict.get("steering_weight", 0.05)),
+        preference_penalty_weight=float(config_dict.get("preference_penalty_weight", 0.05)),
+        heading_reward_weight=float(config_dict.get("heading_reward_weight", 0.5)),
         ref_pos_weight=float(config_dict.get("ref_pos_weight", 0.3)),
         ref_theta1_weight=float(config_dict.get("ref_theta1_weight", 0.5)),
         ref_theta2_weight=float(config_dict.get("ref_theta2_weight", 0.2)),
@@ -345,6 +377,22 @@ if __name__ == "__main__":
         reward_threshold=config.reward_threshold,
         ref_reward_threshold=config.ref_reward_threshold,
         max_w_theta=config.max_w_theta,
+        hitch_angle_weight=config.hitch_angle_weight,
+        # physical parameters
+        l1=config.l1,
+        l2=config.l2,
+        lh=config.lh,
+        tractor_width=config.tractor_width,
+        trailer_width=config.trailer_width,
+        # input constraints
+        v_max=config.v_max,
+        delta_max_deg=config.delta_max_deg,
+        # reward shaping parameters
+        d_thr_factor=config.d_thr_factor,
+        k_switch=config.k_switch,
+        steering_weight=config.steering_weight,
+        preference_penalty_weight=config.preference_penalty_weight,
+        heading_reward_weight=config.heading_reward_weight,
         ref_pos_weight=config.ref_pos_weight,
         ref_theta1_weight=config.ref_theta1_weight,
         ref_theta2_weight=config.ref_theta2_weight
