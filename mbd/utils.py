@@ -205,9 +205,9 @@ def create_animation(env, trajectory_states, trajectory_actions, args):
             rect.set_transform(transform)
             ax.add_patch(rect)
     
-    # Add reference trajectory if available
-    if hasattr(env, 'xref') and args.case == "case1":  # Only show reference for case1
-        ax.plot(env.xref[:, 0], env.xref[:, 1], "g--", alpha=0.5, label="Reference path")
+    # # Add demonstration trajectory if available
+    # if args.enable_demo and hasattr(env, 'xref') and env.xref is not None:
+    #     ax.plot(env.xref[:, 0], env.xref[:, 1], "g--", linewidth=2, label="Demonstration path", alpha=0.7)
     
     # Add start and goal markers
     ax.scatter(env.x0[0], env.x0[1], c='blue', s=150, marker='o', edgecolor='black', linewidth=2, label='Start', zorder=5)
@@ -262,7 +262,7 @@ def create_animation(env, trajectory_states, trajectory_actions, args):
         export_video(args.env_name, "trajectory")
 
 
-def create_denoising_animation(env, Yi, args, step_env_jit, state_init):
+def create_denoising_animation(env, Yi, args, step_env_jit, state_init, frame_skip=1):
     """Create animation showing the denoising process through all diffusion steps"""
     print("Creating denoising process animation...")
     
@@ -362,9 +362,9 @@ def create_denoising_animation(env, Yi, args, step_env_jit, state_init):
             rect.set_transform(transform)
             ax.add_patch(rect)
     
-    # Add reference trajectory if available
-    if hasattr(env, 'xref') and args.case == "case1":  # Only show reference for case1
-        ax.plot(env.xref[:, 0], env.xref[:, 1], "g--", alpha=0.5, label="Reference path")
+    # Add demonstration trajectory if available
+    if args.enable_demo and hasattr(env, 'xref') and env.xref is not None:
+        ax.plot(env.xref[:, 0], env.xref[:, 1], "g--", linewidth=2, label="Demonstration path", alpha=0.7)
     
     # Add start and goal markers
     ax.scatter(env.x0[0], env.x0[1], c='blue', s=150, marker='o', edgecolor='black', linewidth=2, label='Start', zorder=5)
@@ -383,50 +383,51 @@ def create_denoising_animation(env, Yi, args, step_env_jit, state_init):
     
     with tqdm(range(total_steps), desc="Creating denoising animation") as pbar:
         for step in pbar:
-            # Get actions for current denoising step
-            actions = Yi[step]  # Shape: [Hsample, Nu]
-            
-            # Rollout trajectory for current denoising step
-            trajectory_states = [state_init.pipeline_state]
-            state = state_init
-            
-            traj_x = [np.array(state_init.pipeline_state)[0]]
-            traj_y = [np.array(state_init.pipeline_state)[1]]
-            
-            for t in range(actions.shape[0]):
-                action_np = np.array(actions[t])
-                state = step_env_jit(state, actions[t])
-                state_np = np.array(state.pipeline_state)
-                trajectory_states.append(state_np)
-                traj_x.append(state_np[0])
-                traj_y.append(state_np[1])
-            
-            # Update scatter plot with colored points along trajectory
-            if len(traj_x) > 0:
-                positions = np.column_stack([traj_x, traj_y])
-                colors = np.arange(len(traj_x))  # Color progression along trajectory
-                trajectory_scatter.set_offsets(positions)
-                trajectory_scatter.set_array(colors)
+            # Only process frames that aren't skipped
+            if step % frame_skip == 0:
+                # Get actions for current denoising step
+                actions = Yi[step]  # Shape: [Hsample, Nu]
                 
-            # Update trajectory line using set_data
-            trajectory_line.set_data(traj_x, traj_y)
-            # Update opacity to show progression
-            alpha = 0.3 + 0.7 * (step / max(1, total_steps - 1))  # Gradually increase opacity
-            trajectory_line.set_alpha(alpha)
-            
-            # Update title to show current denoising step
-            diffusion_step = args.Ndiffuse - 1 - step
-            title = f"Denoising Step {diffusion_step}/{args.Ndiffuse-1}"
-            ax.set_title(title)
-            
-            # Save frame
-            plt.draw()
-            frame_filename = f"{animation_path}/frame_{frame_idx:04d}.png"
-            plt.savefig(frame_filename, dpi=100, bbox_inches='tight')
-            frame_idx += 1
-            
-            pbar.set_postfix({"step": f"{diffusion_step}"})
-    
+                # Rollout trajectory for current denoising step
+                trajectory_states = [state_init.pipeline_state]
+                state = state_init
+                
+                traj_x = [np.array(state_init.pipeline_state)[0]]
+                traj_y = [np.array(state_init.pipeline_state)[1]]
+                
+                for t in range(actions.shape[0]):
+                    action_np = np.array(actions[t])
+                    state = step_env_jit(state, actions[t])
+                    state_np = np.array(state.pipeline_state)
+                    trajectory_states.append(state_np)
+                    traj_x.append(state_np[0])
+                    traj_y.append(state_np[1])
+                
+                # Update scatter plot with colored points along trajectory
+                if len(traj_x) > 0:
+                    positions = np.column_stack([traj_x, traj_y])
+                    colors = np.arange(len(traj_x))  # Color progression along trajectory
+                    trajectory_scatter.set_offsets(positions)
+                    trajectory_scatter.set_array(colors)
+                    
+                # Update trajectory line using set_data
+                trajectory_line.set_data(traj_x, traj_y)
+                # Update opacity to show progression
+                alpha = 0.3 + 0.7 * (step / max(1, total_steps - 1))  # Gradually increase opacity
+                trajectory_line.set_alpha(alpha)
+                
+                # Update title to show current denoising step
+                diffusion_step = args.Ndiffuse - 1 - step
+                title = f"Denoising Step {diffusion_step}/{args.Ndiffuse-1}"
+                ax.set_title(title)
+                
+                # Save frame
+                plt.draw()
+                frame_filename = f"{animation_path}/frame_{frame_idx:04d}.png"
+                plt.savefig(frame_filename, dpi=100, bbox_inches='tight')
+                frame_idx += 1
+                
+                pbar.set_postfix({"step": f"{diffusion_step}"})
     plt.ioff()
     plt.close()
     

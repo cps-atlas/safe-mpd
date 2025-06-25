@@ -22,23 +22,54 @@ from mbd.utils import (
 class MBDConfig:
     # exp
     seed: int = 0
-    disable_recommended_params: bool = False
     # env
     env_name: str = "tt2d"
     case: str = "case2" # "case1" for original obstacles, "case2" for parking scenario
     # diffusion
     Nsample: int = 20000  # number of samples
     Hsample: int = 50  # horizon
-    Ndiffuse: int = 100  # number of diffusion steps
+    Ndiffuse: int = 150 # number of diffusion steps
     temp_sample: float = 0.01  # temperature for sampling
-    beta0: float = 1e-4  # initial beta
+    beta0: float = 1e-5  # initial beta
     betaT: float = 1e-2  # final beta
-    enable_demo: bool = False
+    enable_demo: bool = True
+    # movement preference
+    movement_preference: int = 1  # 0=none, 1=forward, -1=backward
+    # collision handling
+    collision_penalty: float = 0.15  # penalty applied for obstacle collisions
+    enable_collision_projection: bool = True  # whether to project state back on obstacle collision
+    hitch_penalty: float = 0.10  # penalty applied for hitch angle violations
+    enable_hitch_projection: bool = True  # whether to project state back on hitch violation
+    # reward thresholds
+    reward_threshold: float = 25.0  # position error threshold for main reward function
+    ref_reward_threshold: float = 10.0  # position error threshold for demonstration evaluation
+    max_w_theta: float = 0.75  # maximum weight for heading reward vs position reward
+    hitch_angle_weight: float = 0.2  # weight for hitch angle (articulation) reward
+    # physical parameters
+    l1: float = 3.23  # tractor wheelbase
+    l2: float = 2.9   # trailer length
+    lh: float = 1.15  # hitch length
+    tractor_width: float = 2.0  # tractor width
+    trailer_width: float = 2.5  # trailer width
+    # input constraints
+    v_max: float = 3.0  # velocity limit
+    delta_max_deg: float = 55.0  # steering angle limit in degrees
+    # reward shaping parameters
+    d_thr_factor: float = 1.0  # multiplier for distance threshold (multiplied by rig length)
+    k_switch: float = 2.5  # slope of logistic switch for position/heading reward blending
+    steering_weight: float = 0.05  # weight for trajectory-level steering cost
+    preference_penalty_weight: float = 0.05  # penalty weight for movement preference
+    heading_reward_weight: float = 0.5  # (should be 0.5 always) weight for heading reward calculation
+    # demonstration evaluation weights
+    ref_pos_weight: float = 0.3  # position weight in demo evaluation
+    ref_theta1_weight: float = 0.35  # theta1 weight in demo evaluation  
+    ref_theta2_weight: float = 0.35 # theta2 weight in demo evaluation
     # animation
     render: bool = True
     save_animation: bool = False # flag to enable animation saving
     show_animation: bool = True  # flag to show animation during creation
     save_denoising_animation: bool = False  # flag to enable denoising process visualization
+    frame_skip: int = 1  # skip every other frame for denoising animation
     dt: float = 0.25
 
 
@@ -56,7 +87,6 @@ def dict_to_config_obj(config_dict):
     # Explicitly convert types to ensure proper typing
     return MBDConfig(
         seed=int(config_dict["seed"]),
-        disable_recommended_params=bool(config_dict["disable_recommended_params"]),
         render=bool(config_dict["render"]),
         env_name=str(config_dict["env_name"]),
         case=str(config_dict["case"]),
@@ -67,6 +97,33 @@ def dict_to_config_obj(config_dict):
         beta0=float(config_dict["beta0"]),
         betaT=float(config_dict["betaT"]),
         enable_demo=bool(config_dict["enable_demo"]),
+        movement_preference=int(config_dict.get("movement_preference", 0)),
+        collision_penalty=float(config_dict.get("collision_penalty", 0.15)),
+        enable_collision_projection=bool(config_dict.get("enable_collision_projection", False)),
+        hitch_penalty=float(config_dict.get("hitch_penalty", 0.10)),
+        enable_hitch_projection=bool(config_dict.get("enable_hitch_projection", True)),
+        reward_threshold=float(config_dict.get("reward_threshold", 25.0)),
+        ref_reward_threshold=float(config_dict.get("ref_reward_threshold", 5.0)),
+        max_w_theta=float(config_dict.get("max_w_theta", 0.75)),
+        hitch_angle_weight=float(config_dict.get("hitch_angle_weight", 0.2)),
+        # physical parameters
+        l1=float(config_dict.get("l1", 3.23)),
+        l2=float(config_dict.get("l2", 2.9)),
+        lh=float(config_dict.get("lh", 1.15)),
+        tractor_width=float(config_dict.get("tractor_width", 2.0)),
+        trailer_width=float(config_dict.get("trailer_width", 2.5)),
+        # input constraints
+        v_max=float(config_dict.get("v_max", 3.0)),
+        delta_max_deg=float(config_dict.get("delta_max_deg", 55.0)),
+        # reward shaping parameters
+        d_thr_factor=float(config_dict.get("d_thr_factor", 1.0)),
+        k_switch=float(config_dict.get("k_switch", 2.5)),
+        steering_weight=float(config_dict.get("steering_weight", 0.05)),
+        preference_penalty_weight=float(config_dict.get("preference_penalty_weight", 0.05)),
+        heading_reward_weight=float(config_dict.get("heading_reward_weight", 0.5)),
+        ref_pos_weight=float(config_dict.get("ref_pos_weight", 0.3)),
+        ref_theta1_weight=float(config_dict.get("ref_theta1_weight", 0.5)),
+        ref_theta2_weight=float(config_dict.get("ref_theta2_weight", 0.2)),
         save_animation=bool(config_dict["save_animation"]),
         show_animation=bool(config_dict["show_animation"]),
         save_denoising_animation=bool(config_dict["save_denoising_animation"]),
@@ -96,6 +153,14 @@ def run_diffusion(args=None, env=None):
     rng = jax.random.PRNGKey(seed=args.seed)
     Nx = env.observation_size
     Nu = env.action_size
+    
+    # Generate demonstration trajectory if enabled
+    if args.enable_demo:
+        # Generate demonstration trajectory
+        env.generate_demonstration_trajectory(search_direction="horizontal", movement_preference=args.movement_preference)
+        # Compile the reward function with the demonstration
+        env.compile_reward_function()
+        print(f"Demo trajectory generated with reward: {env.rew_xref:.3f}")
     
     # env functions
     step_env_jit = jax.jit(env.step)
@@ -165,7 +230,7 @@ def run_diffusion(args=None, env=None):
         # sample from q_i
         rng, Y0s_rng = jax.random.split(rng)
         eps_u = jax.random.normal(Y0s_rng, (args.Nsample, args.Hsample, Nu)) # NOTE: Sample from N(0, I) 
-        Y0s = eps_u * sigmas[i] + Ybar_i
+        Y0s = eps_u * sigmas[i]/jnp.sqrt(alphas_bar[i-1]) + Ybar_i # TODO: changed this based on the paper (it seems the original code is wrong)
         Y0s = jnp.clip(Y0s, -1.0, 1.0) # NOTE: clip action to [-1, 1] (it is defined in dynamics)
 
         # esitimate mu_0tm1
@@ -183,14 +248,14 @@ def run_diffusion(args=None, env=None):
 
         # evalulate demo
         if args.enable_demo:
-            xref_logpds = jax.vmap(env.eval_xref_logpd)(qs)
+            xref_logpds = jax.vmap(lambda q: env.eval_xref_logpd(q, movement_preference=args.movement_preference))(qs)
             xref_logpds = xref_logpds - xref_logpds.max()
             logpdemo = (
                 (xref_logpds + env.rew_xref - rew_mean) / rew_std / args.temp_sample
             )
             demo_mask = logpdemo > logp0
             logp0 = jnp.where(demo_mask, logpdemo, logp0)
-            logp0 = (logp0 - logp0.mean()) / logp0.std() / args.temp_sample
+            #logp0 = (logp0 - logp0.mean()) / logp0.std() / args.temp_sample # FIXME: I commented it out since I don't know why this is necessary.
 
         weights = jax.nn.softmax(logp0)
         Ybar = jnp.einsum("n,nij->ij", weights, Y0s)  # NOTE: update only with reward
@@ -247,8 +312,8 @@ def run_diffusion(args=None, env=None):
         fig, ax = plt.subplots(1, 1, figsize=(10, 10))
         # rollout (trajectory already computed above)
         env.render(ax, trajectory_states)
-        if args.enable_demo:
-            ax.plot(env.xref[:, 0], env.xref[:, 1], "g--", label="RRT path")
+        if args.enable_demo and hasattr(env, 'xref') and env.xref is not None:
+            ax.plot(env.xref[:, 0], env.xref[:, 1], "g--", linewidth=2, label="Demonstration path", alpha=0.7)
         ax.legend()
         
         plt.switch_backend('TkAgg')  # Switch to interactive backend
@@ -261,10 +326,6 @@ def run_diffusion(args=None, env=None):
         if args.show_animation or args.save_denoising_animation:
             plt.close(fig)
         
-        # Create denoising animation if requested
-        if args.save_denoising_animation:
-            create_denoising_animation(env, Ybars, args, step_env_jit, state_init)
-            
         # Create animation if requested
         if args.save_animation or args.show_animation:
             # Prepare trajectory data for animation
@@ -282,6 +343,11 @@ def run_diffusion(args=None, env=None):
             
             # Create animation
             create_animation(env, trajectory_states_list, trajectory_actions, args)
+            
+        # Create denoising animation if requested
+        if args.save_denoising_animation:
+            create_denoising_animation(env, Ybars, args, step_env_jit, state_init, frame_skip=args.frame_skip)
+            
         
 
     rewss_final, _ = rollout_us_jit(state_init, Y0)  # Use Y0
@@ -294,7 +360,7 @@ if __name__ == "__main__":
     import time
     start_time = time.time()
     
-    # For standalone testing, use default config
+    # For standalone testing, use default config with demonstration enabled
     config = MBDConfig()
     
     # Create environment
@@ -302,13 +368,43 @@ if __name__ == "__main__":
         config.env_name, 
         case=config.case, 
         dt=config.dt, 
-        H=config.Hsample
+        H=config.Hsample,
+        movement_preference=config.movement_preference,
+        collision_penalty=config.collision_penalty,
+        enable_collision_projection=config.enable_collision_projection,
+        hitch_penalty=config.hitch_penalty,
+        enable_hitch_projection=config.enable_hitch_projection,
+        reward_threshold=config.reward_threshold,
+        ref_reward_threshold=config.ref_reward_threshold,
+        max_w_theta=config.max_w_theta,
+        hitch_angle_weight=config.hitch_angle_weight,
+        # physical parameters
+        l1=config.l1,
+        l2=config.l2,
+        lh=config.lh,
+        tractor_width=config.tractor_width,
+        trailer_width=config.trailer_width,
+        # input constraints
+        v_max=config.v_max,
+        delta_max_deg=config.delta_max_deg,
+        # reward shaping parameters
+        d_thr_factor=config.d_thr_factor,
+        k_switch=config.k_switch,
+        steering_weight=config.steering_weight,
+        preference_penalty_weight=config.preference_penalty_weight,
+        heading_reward_weight=config.heading_reward_weight,
+        ref_pos_weight=config.ref_pos_weight,
+        ref_theta1_weight=config.ref_theta1_weight,
+        ref_theta2_weight=config.ref_theta2_weight
     )
     
     # Set initial position using geometric parameters relative to parking lot
     # dx: distance from tractor front face to target parking space center
     # dy: distance from tractor to parking lot entrance line
     env.set_init_pos(dx=4.0, dy=6.0, theta1=0, theta2=0)
+    # Set goal angles based on movement preference
+    if config.movement_preference == -1:  # backward parking
+        env.set_goal_pos(theta1=jnp.pi/2, theta2=jnp.pi/2)  # backward parking
     
     rew_final, Y0, trajectory_states = run_diffusion(args=config, env=env)
     end_time = time.time()

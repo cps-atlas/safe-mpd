@@ -53,7 +53,7 @@ class Env:
             'occupied_spaces': [1, 2, 4, 5, 6, 7, 9, 10, 12, 13, 14, 15 ],  # 1-indexed, 4 and 9 are vacant
             #'occupied_spaces': [],  # 1-indexed, 4 and 9 are vacant
             'target_spaces': [3, 11],  # Target: tractor in 4, trailer in 9
-            'obstacle_radius': 1.2,   # Radius of obstacles in occupied spaces
+            'obstacle_radius': 1.0,   # Radius of obstacles in occupied spaces
         }
 
     @staticmethod
