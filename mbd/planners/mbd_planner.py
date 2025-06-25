@@ -34,13 +34,26 @@ class MBDConfig:
     betaT: float = 1e-2  # final beta
     enable_demo: bool = True
     # movement preference
-    movement_preference: int = -1  # 0=none, 1=forward, -1=backward # FIXME: need to test backward with real backward initial pose
+    movement_preference: int = 1  # 0=none, 1=forward, -1=backward
+    # collision handling
+    collision_penalty: float = 0.15  # penalty applied for obstacle collisions
+    enable_collision_projection: bool = True  # whether to project state back on obstacle collision
+    hitch_penalty: float = 0.10  # penalty applied for hitch angle violations
+    enable_hitch_projection: bool = True  # whether to project state back on hitch violation
+    # reward thresholds
+    reward_threshold: float = 25.0  # position error threshold for main reward function
+    ref_reward_threshold: float = 10.0  # position error threshold for demonstration evaluation
+    max_w_theta: float = 0.75  # maximum weight for heading reward vs position reward
+    # demonstration evaluation weights
+    ref_pos_weight: float = 0.3  # position weight in demo evaluation
+    ref_theta1_weight: float = 0.35  # theta1 weight in demo evaluation  
+    ref_theta2_weight: float = 0.35 # theta2 weight in demo evaluation
     # animation
     render: bool = True
     save_animation: bool = False # flag to enable animation saving
     show_animation: bool = True  # flag to show animation during creation
     save_denoising_animation: bool = False  # flag to enable denoising process visualization
-    frame_skip: int = 3  # skip every other frame for denoising animation
+    frame_skip: int = 1  # skip every other frame for denoising animation
     dt: float = 0.25
 
 
@@ -69,6 +82,16 @@ def dict_to_config_obj(config_dict):
         betaT=float(config_dict["betaT"]),
         enable_demo=bool(config_dict["enable_demo"]),
         movement_preference=int(config_dict.get("movement_preference", 0)),
+        collision_penalty=float(config_dict.get("collision_penalty", 0.15)),
+        enable_collision_projection=bool(config_dict.get("enable_collision_projection", False)),
+        hitch_penalty=float(config_dict.get("hitch_penalty", 0.10)),
+        enable_hitch_projection=bool(config_dict.get("enable_hitch_projection", True)),
+        reward_threshold=float(config_dict.get("reward_threshold", 25.0)),
+        ref_reward_threshold=float(config_dict.get("ref_reward_threshold", 5.0)),
+        max_w_theta=float(config_dict.get("max_w_theta", 0.75)),
+        ref_pos_weight=float(config_dict.get("ref_pos_weight", 0.3)),
+        ref_theta1_weight=float(config_dict.get("ref_theta1_weight", 0.5)),
+        ref_theta2_weight=float(config_dict.get("ref_theta2_weight", 0.2)),
         save_animation=bool(config_dict["save_animation"]),
         show_animation=bool(config_dict["show_animation"]),
         save_denoising_animation=bool(config_dict["save_denoising_animation"]),
@@ -314,13 +337,26 @@ if __name__ == "__main__":
         case=config.case, 
         dt=config.dt, 
         H=config.Hsample,
-        movement_preference=config.movement_preference
+        movement_preference=config.movement_preference,
+        collision_penalty=config.collision_penalty,
+        enable_collision_projection=config.enable_collision_projection,
+        hitch_penalty=config.hitch_penalty,
+        enable_hitch_projection=config.enable_hitch_projection,
+        reward_threshold=config.reward_threshold,
+        ref_reward_threshold=config.ref_reward_threshold,
+        max_w_theta=config.max_w_theta,
+        ref_pos_weight=config.ref_pos_weight,
+        ref_theta1_weight=config.ref_theta1_weight,
+        ref_theta2_weight=config.ref_theta2_weight
     )
     
     # Set initial position using geometric parameters relative to parking lot
     # dx: distance from tractor front face to target parking space center
     # dy: distance from tractor to parking lot entrance line
-    env.set_init_pos(dx=14.0, dy=6.0, theta1=0, theta2=0)
+    env.set_init_pos(dx=4.0, dy=6.0, theta1=0, theta2=0)
+    # Set goal angles based on movement preference
+    if config.movement_preference == -1:  # backward parking
+        env.set_goal_pos(theta1=jnp.pi/2, theta2=jnp.pi/2)  # backward parking
     
     rew_final, Y0, trajectory_states = run_diffusion(args=config, env=env)
     end_time = time.time()

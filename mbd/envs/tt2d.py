@@ -40,13 +40,32 @@ class TractorTrailer2d:
     Action: [v, delta] - velocity and steering angle
     Input constraint: v ∈ [-1, 1], delta ∈ [-55°, 55°]
     """
-    def __init__(self, x0=None, xg=None, env_config=None, case="case1", dt=0.2, H=50, movement_preference=0):
+    def __init__(self, x0=None, xg=None, env_config=None, case="case1", dt=0.2, H=50, movement_preference=0, 
+                 collision_penalty=0.15, enable_collision_projection=False, hitch_penalty=0.10, 
+                 enable_hitch_projection=True, reward_threshold=25.0, ref_reward_threshold=5.0,
+                 max_w_theta=0.75, ref_pos_weight=0.3, ref_theta1_weight=0.5, ref_theta2_weight=0.2):
         # Time parameters
         self.dt = dt
         self.H = H
         
         # Movement preference: 0=none, 1=forward, -1=backward
         self.movement_preference = movement_preference
+        
+        # Collision handling parameters
+        self.collision_penalty = collision_penalty
+        self.enable_collision_projection = enable_collision_projection
+        self.hitch_penalty = hitch_penalty
+        self.enable_hitch_projection = enable_hitch_projection
+        
+        # Reward thresholds
+        self.reward_threshold = reward_threshold
+        self.ref_reward_threshold = ref_reward_threshold
+        self.max_w_theta = max_w_theta
+        
+        # Demonstration evaluation weights
+        self.ref_pos_weight = ref_pos_weight
+        self.ref_theta1_weight = ref_theta1_weight
+        self.ref_theta2_weight = ref_theta2_weight
         
         # Tractor-trailer parameters
         self.l1 = 3.23  # tractor wheelbase
@@ -61,21 +80,12 @@ class TractorTrailer2d:
         
         # --- reward-shaping hyper-parameters ----------------------
         self.theta_max = jnp.pi / 2          # 90° cap in rad
-        self.phi_max = jnp.deg2rad(30.0)     # 30° cap for articulation
+        self.phi_max = jnp.deg2rad(40.0)     # 30° cap for articulation
         self.d_thr = 1.0 * (self.l1 + self.lh + self.l2)  # 'one rig length'
         self.k_switch = 2.5                  # [m] slope of logistic switch
         self.steering_weight = 0.05          # weight for trajectory-level steering cost
         
-        # Reward and reference thresholds (hyperparameters)
-        if case == "case1":
-            self.reward_threshold = 1.2  # was 0.2 for original scale, scaled by 6x for [-3, 3]
-            self.ref_threshold = 3.0     # was 0.5 for original scale, scaled by 6x for [-3, 3]
-        elif case == "case2":
-            self.reward_threshold = 25.0  # Larger threshold for parking scenario
-            self.ref_threshold = 3.0     # Larger threshold for parking scenario
-        elif case == "case3":
-            self.reward_threshold = 25.0  # Similar to case2 for CarMaker parking scenario
-            self.ref_threshold = 3.0     # Similar to case2
+
         
         # Environment setup
         if env_config is None:
@@ -188,9 +198,29 @@ class TractorTrailer2d:
             y = y if y is not None else 0.0
             self.x0 = jnp.array([x, y, theta1, theta2])
 
-    def set_goal_pos(self, x=3.0, y=0.0, theta1=np.pi, theta2=np.pi):
-        """Set goal position for tractor-trailer (case1 default)"""
-        self.xg = jnp.array([x, y, theta1, theta2]) 
+    def set_goal_pos(self, x=None, y=None, theta1=None, theta2=None):
+        """
+        Set goal position for tractor-trailer.
+        If self.xg exists, only update specified values.
+        If self.xg doesn't exist, use defaults for unspecified values.
+        
+        Default values:
+        x = 3.0, y = 0.0, theta1 = pi, theta2 = pi
+        """
+        if hasattr(self, 'xg'):
+            # Update only specified values while keeping others unchanged
+            new_x = x if x is not None else self.xg[0]
+            new_y = y if y is not None else self.xg[1] 
+            new_theta1 = theta1 if theta1 is not None else self.xg[2]
+            new_theta2 = theta2 if theta2 is not None else self.xg[3]
+        else:
+            # Use defaults for unspecified values
+            new_x = x if x is not None else 3.0
+            new_y = y if y is not None else 0.0
+            new_theta1 = theta1 if theta1 is not None else np.pi
+            new_theta2 = theta2 if theta2 is not None else np.pi
+            
+        self.xg = jnp.array([new_x, new_y, new_theta1, new_theta2])
         print(f"overwrite xg: {self.xg}")
         
     def set_rectangle_obs(self, rectangles, coordinate_mode="left-top", padding=0.0):
@@ -240,17 +270,20 @@ class TractorTrailer2d:
         q = state.pipeline_state
         q_new = rk4(self.tractor_trailer_dynamics, state.pipeline_state, u_scaled, self.dt)
         
-        # Check collision with full geometry and hitch angle violations
-        collide = self.check_collision(q_new, self.obs_circles, self.obs_rectangles)
+        # Check obstacle collision and hitch angle violation separately
+        obstacle_collision = self.check_obstacle_collision(q_new, self.obs_circles, self.obs_rectangles)
+        hitch_violation = self.check_hitch_violation(q_new)
         
-        # If collision, don't update the state but apply collision penalty
-        #q = jnp.where(collide, q, q_new)
-        
-        q = q_new # FIXME: no projection now
+        # Apply different projections based on type of violation
+        # Obstacle collision: use collision projection setting
+        # Hitch violation: use hitch projection setting
+        q_after_collision_proj = jnp.where(self.enable_collision_projection & obstacle_collision, q, q_new)
+        q = jnp.where(self.enable_hitch_projection & hitch_violation, q, q_after_collision_proj)
         
         # Compute reward: normal reward if no collision/violation, penalty if collision/hitch violation
         reward = self.get_reward(q)
-        reward = jnp.where(collide, reward-0.15, reward) # FIXME: a magic parameter here should be fixed. It's penalizing the collision
+        reward = jnp.where(obstacle_collision, reward - self.collision_penalty, reward)
+        reward = jnp.where(hitch_violation, reward - self.hitch_penalty, reward)
         
         # Add preference penalty based on movement direction
         # Use JAX conditional operations instead of Python if
@@ -272,7 +305,7 @@ class TractorTrailer2d:
             penalty: small penalty for non-preferred movement direction
         """
         v, delta = u
-        penalty_weight = 0.01  # Small penalty weight
+        penalty_weight = 0.05  # Increased penalty weight for stronger preference enforcement
         
         # Forward preference penalty (penalize backward movement)
         forward_penalty = jnp.where(v < 0, penalty_weight * jnp.abs(v), 0.0)
@@ -460,13 +493,6 @@ class TractorTrailer2d:
             dy = points_2d[i+1, 1] - points_2d[i, 1]
             if np.abs(dx) > 1e-6 or np.abs(dy) > 1e-6:
                 theta = np.arctan2(dy, dx)
-                
-                # Adjust angle based on movement preference
-                if movement_preference == -1:  # Backward preference
-                    # For backward movement, add 180 degrees to indicate backward direction
-                    theta = theta + np.pi
-                    if theta > np.pi:
-                        theta -= 2 * np.pi
             else:
                 # No movement, keep previous angle or use goal angle
                 theta = xref[i-1, 2] if i > 0 else self.xg[2]
@@ -474,20 +500,9 @@ class TractorTrailer2d:
             xref[i, 2] = theta  # theta1
             xref[i, 3] = theta  # theta2 (assume aligned)
         
-        # Last point uses goal angles (adjusted for preference if needed)
-        goal_theta1 = self.xg[2]
-        goal_theta2 = self.xg[3]
-        
-        if movement_preference == -1:  # Backward preference
-            # Ensure goal angles indicate backward direction
-            goal_theta1 = goal_theta1 + np.pi
-            goal_theta2 = goal_theta2 + np.pi
-            # Wrap to [-pi, pi]
-            goal_theta1 = ((goal_theta1 + np.pi) % (2 * np.pi)) - np.pi
-            goal_theta2 = ((goal_theta2 + np.pi) % (2 * np.pi)) - np.pi
-        
-        xref[-1, 2] = goal_theta1
-        xref[-1, 3] = goal_theta2
+        # Last point uses goal angles (as manually set)
+        xref[-1, 2] = self.xg[2]
+        xref[-1, 3] = self.xg[3]
         
         # Convert to jax array
         self.xref = jnp.array(xref)
@@ -536,37 +551,47 @@ class TractorTrailer2d:
         ) # TODO: currently not using
 
         # ---------------------------------------------------------------
-        # 1. positional reward   (unchanged maths, new symbol r_pos)
-        d_pos   = jnp.linalg.norm(tractor_pos - tractor_goal)
-        r_pos   = 1.0 - (jnp.clip(d_pos, 0., self.reward_threshold)
-                         / self.reward_threshold) ** 2
+        # 1. positional reward - use different position based on preference
+        # Forward preference: track tractor position
+        # Backward/None preference: track trailer position
+        use_tractor_tracking = self.movement_preference == 1
+        
+        # Compute distances for both cases
+        d_pos_tractor = jnp.linalg.norm(tractor_pos - tractor_goal)
+        d_pos_trailer = jnp.linalg.norm(trailer_pos - trailer_goal)
+        
+        # Select distance based on preference
+        d_pos = jnp.where(use_tractor_tracking, d_pos_tractor, d_pos_trailer)
+        r_pos = 1.0 - (jnp.clip(d_pos, 0., self.reward_threshold)
+                       / self.reward_threshold) ** 2
 
         # ---------------------------------------------------------------
         # 2. heading-to-goal alignment  r_hdg
         wrap_pi = lambda a: (a + jnp.pi) % (2.*jnp.pi) - jnp.pi
         
-        # Compute both wrapped and direct angle errors
-        # For no preference (angle wrapping)
-        e_theta1_forward = wrap_pi(theta1 - thetag)
-        e_theta2_forward = wrap_pi(theta2 - thetag)
-        total_err_forward = jnp.abs(e_theta1_forward) + jnp.abs(e_theta2_forward)
-        
-        e_theta1_backward = wrap_pi(theta1 - thetag - jnp.pi)
-        e_theta2_backward = wrap_pi(theta2 - thetag - jnp.pi)
-        total_err_backward = jnp.abs(e_theta1_backward) + jnp.abs(e_theta2_backward)
-        
-        use_forward = total_err_forward < total_err_backward
-        e_theta1_wrapped = jnp.where(use_forward, e_theta1_forward, e_theta1_backward)
-        e_theta2_wrapped = jnp.where(use_forward, e_theta2_forward, e_theta2_backward)
-        
-        # For has preference (direct difference)
+        # Handle angle errors based on movement preference:
+        # - No preference (0): Use angle wrapping to find best orientation (direct vs π-offset)
+        # - Has preference (±1): Goal angles are manually set correctly, use direct difference
+        # Compute both direct and offset angle errors
+        # Try direct angle alignment
         e_theta1_direct = wrap_pi(theta1 - thetag)
         e_theta2_direct = wrap_pi(theta2 - thetag)
+        total_err_direct = jnp.abs(e_theta1_direct) + jnp.abs(e_theta2_direct)
         
-        # Select angle errors based on preference
-        use_wrapping = self.movement_preference == 0
-        e_theta1 = jnp.where(use_wrapping, e_theta1_wrapped, e_theta1_direct)
-        e_theta2 = jnp.where(use_wrapping, e_theta2_wrapped, e_theta2_direct)
+        # Try offset by π (opposite orientation) 
+        e_theta1_offset = wrap_pi(theta1 - thetag - jnp.pi)
+        e_theta2_offset = wrap_pi(theta2 - thetag - jnp.pi)
+        total_err_offset = jnp.abs(e_theta1_offset) + jnp.abs(e_theta2_offset)
+        
+        # Choose orientation with smaller total error (for no preference case)
+        use_direct = total_err_direct < total_err_offset
+        e_theta1_wrapped = jnp.where(use_direct, e_theta1_direct, e_theta1_offset)
+        e_theta2_wrapped = jnp.where(use_direct, e_theta2_direct, e_theta2_offset)
+        
+        # Select final angles: use wrapping only when no preference, direct otherwise
+        no_preference = self.movement_preference == 0
+        e_theta1 = jnp.where(no_preference, e_theta1_wrapped, e_theta1_direct)
+        e_theta2 = jnp.where(no_preference, e_theta2_wrapped, e_theta2_direct)
 
         r_hdg = 0.5 * ( 1.0 - (jnp.abs(e_theta1) / self.theta_max) ** 2
                       + 1.0 - (jnp.abs(e_theta2) / self.theta_max) ** 2 )
@@ -581,7 +606,7 @@ class TractorTrailer2d:
         sigmoid  = lambda z: 1.0 / (1.0 + jnp.exp(-z))
         w_theta = sigmoid((self.d_thr - d_pos) / self.k_switch)      # ∈ (0,1)
         # set upper bound on w_theta
-        w_theta = jnp.clip(w_theta, 0.0, 0.75) # prevent dropping off all the position reward # FIXME: magic parameter. Works from 0.7 - 0.85
+        w_theta = jnp.clip(w_theta, 0.0, self.max_w_theta) # prevent dropping off all the position reward
 
         # ---------------------------------------------------------------
         # 5. weighted stage cost
@@ -725,23 +750,22 @@ class TractorTrailer2d:
         return ~jnp.any(separations)
 
     @partial(jax.jit, static_argnums=(0,))
-    def check_collision(self, x, obs_circles, obs_rectangles):
-        """Check collision with full tractor-trailer geometry against all obstacles and hitch angle violations"""
+    def check_hitch_violation(self, x):
+        """Check hitch angle violation (jack-knifing prevention)"""
         px, py, theta1, theta2 = x
-        
-        # Check hitch angle violation (jack-knifing prevention)
         wrap_pi = lambda a: (a + jnp.pi) % (2.*jnp.pi) - jnp.pi
         hitch_angle = wrap_pi(theta1 - theta2)
-        hitch_violation = jnp.abs(hitch_angle) > self.phi_max
-        
-        #jax.debug.print("hitch angle first element:", hitch_angle) # FIXME:
-        
+        return jnp.abs(hitch_angle) > self.phi_max
+
+    @partial(jax.jit, static_argnums=(0,))
+    def check_obstacle_collision(self, x, obs_circles, obs_rectangles):
+        """Check collision with full tractor-trailer geometry against all obstacles"""
         # Get tractor and trailer geometry
         geometry = self.get_tractor_trailer_rectangles(x)
         tractor_corners = geometry['tractor_corners']
         trailer_corners = geometry['trailer_corners']
         
-        collision = hitch_violation  # Start with hitch angle violation
+        collision = False  # Start with no collision
         
         # Check circular obstacles
         if obs_circles.shape[0] > 0:
@@ -802,6 +826,13 @@ class TractorTrailer2d:
             collision = collision | jnp.any(rect_collisions)
         
         return collision
+    
+    @partial(jax.jit, static_argnums=(0,))
+    def check_collision(self, x, obs_circles, obs_rectangles):
+        """Check collision with full tractor-trailer geometry against all obstacles and hitch angle violations (legacy function)"""
+        obstacle_collision = self.check_obstacle_collision(x, obs_circles, obs_rectangles)
+        hitch_violation = self.check_hitch_violation(x)
+        return obstacle_collision | hitch_violation
 
     def eval_xref_logpd(self, xs, movement_preference=None):
         """Evaluate log probability density with respect to reference trajectory"""
@@ -815,69 +846,68 @@ class TractorTrailer2d:
         
         # JIT-compile the actual computation
         @jax.jit
-        def _eval_xref_logpd(xs, xref, ref_threshold, theta_max, movement_preference):
+        def _eval_xref_logpd(xs, xref, ref_threshold, phi_max, movement_preference, ref_pos_weight, ref_theta1_weight, ref_theta2_weight):
             # Position error - use different reference points based on preference
             # Use JAX conditional operations instead of Python if statements
             
             # For tractor position (forward preference)
             xs_tractor = xs[:, :2]
-            ref_tractor = xref[:, :2]
+            ref_pos = xref[:, :2]
             
             # For trailer position (backward/none preference)
             xs_trailer = jax.vmap(self.get_trailer_position)(xs)
-            ref_trailer = jax.vmap(self.get_trailer_position)(xref) # FIXME: may not need to convert to trailer for demonstration
             
             # Select position based on preference using jnp.where
             use_tractor = movement_preference == 1
             xs_pos = jnp.where(use_tractor, xs_tractor, xs_trailer)
-            ref_pos = jnp.where(use_tractor, ref_tractor, ref_trailer)
             
             xs_pos_err = xs_pos - ref_pos
             pos_err_norm = jnp.linalg.norm(xs_pos_err, axis=-1)
             pos_logpd = -(jnp.clip(pos_err_norm, 0.0, ref_threshold) / ref_threshold) ** 2
             
-            # Angle error handling based on preference
+            # Angle error handling based on preference:
+            # - No preference (0): Use angle wrapping to find best orientation (direct vs π-offset)
+            # - Has preference (±1): Goal angles are manually set correctly, use direct difference
             wrap_pi = lambda a: (a + jnp.pi) % (2.*jnp.pi) - jnp.pi
-            
-            # Compute both wrapped and direct angle errors
-            # For no preference (angle wrapping)
-            theta1_err_forward = wrap_pi(xs[:, 2] - xref[:, 2])
-            theta2_err_forward = wrap_pi(xs[:, 3] - xref[:, 3])
-            total_err_forward = jnp.abs(theta1_err_forward) + jnp.abs(theta2_err_forward)
-            
-            theta1_err_backward = wrap_pi(xs[:, 2] - xref[:, 2] - jnp.pi)
-            theta2_err_backward = wrap_pi(xs[:, 3] - xref[:, 3] - jnp.pi)
-            total_err_backward = jnp.abs(theta1_err_backward) + jnp.abs(theta2_err_backward)
-            
-            use_forward = total_err_forward < total_err_backward
-            theta1_err_wrapped = jnp.where(use_forward, theta1_err_forward, theta1_err_backward)
-            theta2_err_wrapped = jnp.where(use_forward, theta2_err_forward, theta2_err_backward)
             
             # For has preference (direct difference)
             theta1_err_direct = wrap_pi(xs[:, 2] - xref[:, 2])
             theta2_err_direct = wrap_pi(xs[:, 3] - xref[:, 3])
+            total_err_direct = jnp.abs(theta1_err_direct) + jnp.abs(theta2_err_direct)
             
-            # Select angle errors based on preference
-            use_wrapping = movement_preference == 0
-            theta1_err = jnp.where(use_wrapping, theta1_err_wrapped, theta1_err_direct)
-            theta2_err = jnp.where(use_wrapping, theta2_err_wrapped, theta2_err_direct)
+            # Try offset by π (opposite orientation)
+            theta1_err_offset = wrap_pi(xs[:, 2] - xref[:, 2] - jnp.pi)
+            theta2_err_offset = wrap_pi(xs[:, 3] - xref[:, 3] - jnp.pi)
+            total_err_offset = jnp.abs(theta1_err_offset) + jnp.abs(theta2_err_offset)
             
-            theta1_logpd = -(jnp.clip(jnp.abs(theta1_err), 0.0, theta_max) / theta_max) ** 2
-            theta2_logpd = -(jnp.clip(jnp.abs(theta2_err), 0.0, theta_max) / theta_max) ** 2
+            # Choose orientation with smaller total error (for no preference case)
+            use_direct = total_err_direct < total_err_offset
+            theta1_err_wrapped = jnp.where(use_direct, theta1_err_direct, theta1_err_offset)
+            theta2_err_wrapped = jnp.where(use_direct, theta2_err_direct, theta2_err_offset)
             
-            # Combined logpd with weights
-            # Position gets more weight than individual angles
-            pos_weight = 0.6
-            theta1_weight = 0.2
-            theta2_weight = 0.2
+            # Select final angles: use wrapping only when no preference, direct otherwise
+            no_preference = movement_preference == 0
+            theta1_err = jnp.where(no_preference, theta1_err_wrapped, theta1_err_direct)
+            theta2_err = jnp.where(no_preference, theta2_err_wrapped, theta2_err_direct)
             
-            combined_logpd = (pos_weight * pos_logpd + 
-                            theta1_weight * theta1_logpd + 
-                            theta2_weight * theta2_logpd)
+            
+            # Select final angles: use wrapping only when no preference, direct otherwise
+            no_preference = movement_preference == 0
+            theta1_err = jnp.where(no_preference, theta1_err_wrapped, theta1_err_direct)
+            theta2_err = jnp.where(no_preference, theta2_err_wrapped, theta2_err_direct)
+            
+            theta1_logpd = -(jnp.clip(jnp.abs(theta1_err), 0.0, phi_max) / phi_max) ** 2
+            theta2_logpd = -(jnp.clip(jnp.abs(theta2_err), 0.0, phi_max) / phi_max) ** 2
+            
+            # Combined logpd with configurable weights
+            combined_logpd = (ref_pos_weight * pos_logpd + 
+                            ref_theta1_weight * theta1_logpd + 
+                            ref_theta2_weight * theta2_logpd)
             
             return combined_logpd.mean(axis=-1)
         
-        return _eval_xref_logpd(xs, self.xref, 5.0, jnp.deg2rad(50.0), movement_preference) # FIXME: magic parameter
+        return _eval_xref_logpd(xs, self.xref, self.ref_reward_threshold, self.phi_max, movement_preference, 
+                               self.ref_pos_weight, self.ref_theta1_weight, self.ref_theta2_weight)
 
     @property
     def action_size(self):
