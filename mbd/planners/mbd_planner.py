@@ -386,18 +386,23 @@ def run_diffusion(args=None, env=None):
     # run reverse
     def reverse(YN, rng):
         Yi = YN
-        Ybars = []
+        # Pre-allocate Ybars array to avoid dynamic concatenation recompilation
+        # Shape: (Ndiffuse-1, Hsample, Nu) where Ndiffuse-1 is the number of iterations
+        num_iterations = args.Ndiffuse - 1
+        Ybars = jnp.zeros((num_iterations, args.Hsample, Nu))
+        
         with tqdm(range(args.Ndiffuse - 1, 0, -1), desc="Diffusing") as pbar:
-            for i in pbar:
+            for idx, i in enumerate(pbar):
                 carry_once = (i, rng, Yi)
                 # Check if this call triggers recompilation
                 if i == args.Ndiffuse - 1:
                     print(f"    First diffusion step: carry shapes i={i}, rng.shape={rng.shape}, Yi.shape={Yi.shape}")
                 (i, rng, Yi), rew = reverse_once(carry_once, None) # NOTE: just to maintain similar style with scan, here no xs. 
-                Ybars.append(Yi)
+                # Use index assignment instead of append to avoid recompilation
+                Ybars = Ybars.at[idx].set(Yi)
                 # Update the progress bar's suffix to show the current reward
                 pbar.set_postfix({"rew": f"{rew:.2e}"})
-        return jnp.array(Ybars), Yi  # Return both all Ybars and final Yi
+        return Ybars, Yi  # Return both all Ybars and final Yi
 
     rng_exp, rng = jax.random.split(rng)
     Ybars, Y0 = reverse(YN, rng_exp) # NOTE: YN: all zeros, one trajectory of actions 
@@ -421,29 +426,15 @@ def run_diffusion(args=None, env=None):
     
     state = state_init
     
-    # Debug the state and action types/shapes for the first few iterations
+    # Process trajectory states using pre-allocated arrays
     for t in range(Y0.shape[0]):
         action_raw = Y0[t]
         # Create a fresh array to avoid JAX type inconsistencies from array slicing
         action = jnp.array(action_raw)
         
-        if t < 3:  # Debug first 3 iterations
-            print(f"    Iteration {t}: action_raw.shape={action_raw.shape}, action_raw.dtype={action_raw.dtype}")
-            print(f"    Iteration {t}: action.shape={action.shape}, action.dtype={action.dtype}")
-            print(f"    Iteration {t}: state.pipeline_state.shape={state.pipeline_state.shape}, state.pipeline_state.dtype={state.pipeline_state.dtype}")
-            print(f"    Iteration {t}: state type: {type(state)}")
-            # Check if action is exactly the same type as the dummy_action from warmup
-            if hasattr(action, 'dtype') and hasattr(dummy_action, 'dtype'):
-                print(f"    Iteration {t}: action dtype matches dummy: {action.dtype == dummy_action.dtype}")
-                print(f"    Iteration {t}: action vs dummy_action exact equality: {jnp.array_equal(action.shape, dummy_action.shape) and action.dtype == dummy_action.dtype}")
-            print(f"    Iteration {t}: About to call step_env_jit...")
-        
         state = step_env_jit(state, action)
         # Use index assignment instead of concatenation to avoid recompilation
         xs = xs.at[t + 1].set(state.pipeline_state)
-        
-        if t < 3:
-            print(f"    Iteration {t}: step_env_jit completed")
     
     trajectory_states = xs
     print("Post-processing trajectory computation completed")
