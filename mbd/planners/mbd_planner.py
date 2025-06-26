@@ -218,6 +218,9 @@ def run_diffusion(args=None, env=None):
     # Warm-up phase: compile JIT functions with correct arguments (only if using new functions)
     need_warmup = env_cache_key not in _jit_function_cache or reverse_once_cache_key not in _jit_function_cache
     
+    # Define YN regardless of warmup status (needed for actual computation later)
+    YN = jnp.zeros([args.Hsample, Nu])
+    
     if need_warmup:
         print("Warming up JIT compiled functions...")
         print(f"Environment shapes: Nx={Nx}, Nu={Nu}")
@@ -352,7 +355,6 @@ def run_diffusion(args=None, env=None):
         # Warm up reverse_once function that will be used in actual computation
         # This ensures JIT compilation happens now with correct arguments, not during timing
         print("  Warming up reverse_once...")
-        YN = jnp.zeros([args.Hsample, Nu])
         warmup_i = args.Ndiffuse - 1  # Valid index for warmup
         warmup_carry = (warmup_i, rng, YN)
         print(f"    warmup_carry shapes: i={warmup_i}, rng.shape={rng.shape}, YN.shape={YN.shape}")
