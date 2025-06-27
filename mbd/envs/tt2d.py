@@ -325,10 +325,14 @@ class TractorTrailer2d:
         # Select penalty based on preference using JAX conditionals
         is_forward_pref = self.motion_preference == 1
         is_backward_pref = self.motion_preference == -1
+        is_forward_enforce = self.motion_preference == 2
+        is_backward_enforce = self.motion_preference == -2
         
-        # Use nested jnp.where to handle three cases
+        # Use nested jnp.where to handle all cases
+        # For strict enforcement (2, -2), no penalty is needed since motion is already constrained
         penalty = jnp.where(is_forward_pref, forward_penalty,
-                           jnp.where(is_backward_pref, backward_penalty, no_penalty))
+                           jnp.where(is_backward_pref, backward_penalty,
+                           jnp.where(is_forward_enforce | is_backward_enforce, no_penalty, no_penalty)))
             
         return penalty
 
@@ -558,9 +562,9 @@ class TractorTrailer2d:
 
         # ---------------------------------------------------------------
         # 1. positional reward - use different position based on preference
-        # Forward preference: track tractor position
+        # Forward preference/enforcement: track tractor position
         # Backward/None preference: track trailer position
-        use_tractor_tracking = self.motion_preference == 1
+        use_tractor_tracking = (self.motion_preference == 1) | (self.motion_preference == 2)
         
         # Compute distances for both cases
         d_pos_tractor = jnp.linalg.norm(tractor_pos - tractor_goal)
@@ -577,7 +581,7 @@ class TractorTrailer2d:
         
         # Handle angle errors based on motion preference:
         # - No preference (0): Use angle wrapping to find best orientation (direct vs π-offset)
-        # - Has preference (±1): Goal angles are manually set correctly, use direct difference
+        # - Has preference/enforcement (±1, ±2): Goal angles are manually set correctly, use direct difference
         # Compute both direct and offset angle errors
         # Try direct angle alignment
         e_theta1_direct = wrap_pi(theta1 - thetag)
@@ -864,7 +868,7 @@ class TractorTrailer2d:
             xs_trailer = jax.vmap(self.get_trailer_position)(xs)
             
             # Select position based on preference using jnp.where
-            use_tractor = motion_preference == 1
+            use_tractor = (motion_preference == 1) | (motion_preference == 2)
             xs_pos = jnp.where(use_tractor, xs_tractor, xs_trailer)
             
             xs_pos_err = xs_pos - ref_pos
@@ -873,7 +877,7 @@ class TractorTrailer2d:
             
             # Angle error handling based on preference:
             # - No preference (0): Use angle wrapping to find best orientation (direct vs π-offset)
-            # - Has preference (±1): Goal angles are manually set correctly, use direct difference
+            # - Has preference/enforcement (±1, ±2): Goal angles are manually set correctly, use direct difference
             wrap_pi = lambda a: (a + jnp.pi) % (2.*jnp.pi) - jnp.pi
             
             # For has preference (direct difference)

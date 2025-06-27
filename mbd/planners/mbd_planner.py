@@ -20,7 +20,7 @@ from mbd.utils import (
 
 # Enable JAX compilation logging
 logging.basicConfig(level=logging.INFO)
-jax.config.update('jax_log_compiles', True)
+jax.config.update('jax_log_compiles', False)
 
 # Global compilation counter for debugging
 compilation_count = 0
@@ -54,7 +54,7 @@ class MBDConfig:
     betaT: float = 1e-2  # final beta
     enable_demo: bool = True
     # movement preference
-    motion_preference: int = 1  # 0=none, 1=forward, -1=backward
+    motion_preference: int = -2  # 0=none, 1=forward, -1=backward
     # collision handling
     collision_penalty: float = 0.15  # penalty applied for obstacle collisions
     enable_collision_projection: bool = True  # whether to project state back on obstacle collision
@@ -314,6 +314,32 @@ def run_diffusion(args=None, env=None):
             eps_u = jax.random.normal(Y0s_rng, (args.Nsample, args.Hsample, Nu)) # NOTE: Sample from N(0, I) 
             Y0s = eps_u * sigmas[i]/jnp.sqrt(alphas_bar[i-1]) + Ybar_i # TODO: changed this based on the paper (it seems the original code is wrong)
             Y0s = jnp.clip(Y0s, -1.0, 1.0) # NOTE: clip action to [-1, 1] (it is defined in dynamics)
+            
+            # Apply strict motion enforcement for motion_preference = 2 or -2
+            # For 2: enforce forward only (clip velocity to [0, 1])
+            # For -2: enforce backward only (clip velocity to [-1, 0])
+            velocity_component = Y0s[:, :, 0]
+            
+            # Use JAX conditionals to avoid recompilation
+            # Forward only enforcement (motion_preference = 2)
+            velocity_forward_only = jnp.clip(velocity_component, 0.0, 1.0)
+            
+            # Backward only enforcement (motion_preference = -2)
+            velocity_backward_only = jnp.clip(velocity_component, -1.0, 0.0)
+            
+            # Select appropriate velocity clipping based on motion_preference
+            velocity_final = jnp.where(
+                args.motion_preference == 2,
+                velocity_forward_only,
+                jnp.where(
+                    args.motion_preference == -2,
+                    velocity_backward_only,
+                    velocity_component  # No additional clipping for other values
+                )
+            )
+            
+            # Update Y0s with the modified velocity component
+            Y0s = Y0s.at[:, :, 0].set(velocity_final)
 
             # esitimate mu_0tm1
             rewss, qs = jax.vmap(rollout_us_jit, in_axes=(None, 0))(state_init, Y0s)
@@ -586,8 +612,10 @@ if __name__ == "__main__":
     # dx: distance from tractor front face to target parking space center
     # dy: distance from tractor to parking lot entrance line
     env.set_init_pos(dx=-3.0, dy=1.0, theta1=0, theta2=0)
+    if config.motion_preference == -2:
+        env.set_init_pos(dx=-12.0, dy=1.0, theta1=jnp.pi, theta2=jnp.pi)
     # Set goal angles based on motion preference
-    if config.motion_preference == -1:  # backward parking
+    if config.motion_preference in [-1, -2]:  # backward parking
         env.set_goal_pos(theta1=jnp.pi/2, theta2=jnp.pi/2)  # backward parking
     
     rew_final, Y0, trajectory_states, timing_info = run_diffusion(args=config, env=env)
