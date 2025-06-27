@@ -24,8 +24,22 @@ def rollout_us(step_env, state, us):
         state = step_env(state, u)
         return state, (state.reward, state.pipeline_state)
 
-    _, (rews, pipline_states) = jax.lax.scan(step, state, us) # NOTE: returns stack of (rew, pipline_state). _ is the final carry, which is final state in this case
+    final_state, (rews, pipline_states) = jax.lax.scan(step, state, us) # NOTE: returns stack of (rew, pipline_state). _ is the final carry, which is final state in this case
     return rews, pipline_states
+
+def rollout_us_with_terminal(step_env, env, state, us):
+    """Rollout with terminal reward added to final timestep"""
+    def step(state, u):
+        state = step_env(state, u)
+        return state, (state.reward, state.pipeline_state)
+
+    final_state, (rews, pipline_states) = jax.lax.scan(step, state, us)
+    
+    # Add terminal reward to the final timestep
+    terminal_reward = env.get_terminal_reward(final_state.pipeline_state)
+    rews_with_terminal = rews.at[-1].add(env.terminal_reward_weight * terminal_reward)
+    
+    return rews_with_terminal, pipline_states
 
 # def render_us(step_env, sys, state, us):
 #     rollout = []

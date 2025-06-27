@@ -11,6 +11,7 @@ import logging
 import mbd
 from mbd.utils import (
     rollout_us, 
+    rollout_us_with_terminal,
     create_animation, 
     create_denoising_animation
 )
@@ -20,7 +21,7 @@ from mbd.utils import (
 
 # Enable JAX compilation logging
 logging.basicConfig(level=logging.INFO)
-jax.config.update('jax_log_compiles', True)
+jax.config.update('jax_log_compiles', False)
 
 # Global compilation counter for debugging
 compilation_count = 0
@@ -60,11 +61,6 @@ class MBDConfig:
     enable_collision_projection: bool = True  # whether to project state back on obstacle collision
     hitch_penalty: float = 0.10  # penalty applied for hitch angle violations
     enable_hitch_projection: bool = True  # whether to project state back on hitch violation
-    # reward thresholds
-    reward_threshold: float = 25.0  # position error threshold for main reward function
-    ref_reward_threshold: float = 10.0  # position error threshold for demonstration evaluation
-    max_w_theta: float = 0.75  # maximum weight for heading reward vs position reward
-    hitch_angle_weight: float = 0.2  # weight for hitch angle (articulation) reward
     # physical parameters
     l1: float = 3.23  # tractor wheelbase
     l2: float = 2.9   # trailer length
@@ -74,6 +70,14 @@ class MBDConfig:
     # input constraints
     v_max: float = 3.0  # velocity limit
     delta_max_deg: float = 55.0  # steering angle limit in degrees
+    # reward thresholds
+    reward_threshold: float = 25.0  # position error threshold for main reward function
+    ref_reward_threshold: float = 10.0  # position error threshold for demonstration evaluation
+    max_w_theta: float = 0.75  # maximum weight for heading reward vs position reward
+    hitch_angle_weight: float = 0.2  # weight for hitch angle (articulation) reward
+    # terminal reward
+    terminal_reward_threshold: float = 10.0  # position error threshold for terminal reward
+    terminal_reward_weight: float = 0.05  # weight for terminal reward at final state
     # reward shaping parameters
     d_thr_factor: float = 1.0  # multiplier for distance threshold (multiplied by rig length)
     k_switch: float = 2.5  # slope of logistic switch for position/heading reward blending
@@ -87,7 +91,7 @@ class MBDConfig:
     # animation
     render: bool = True
     save_animation: bool = False # flag to enable animation saving
-    show_animation: bool = False  # flag to show animation during creation
+    show_animation: bool = True  # flag to show animation during creation
     save_denoising_animation: bool = False  # flag to enable denoising process visualization
     frame_skip: int = 1  # skip every other frame for denoising animation
     dt: float = 0.25
@@ -141,6 +145,8 @@ def dict_to_config_obj(config_dict):
         steering_weight=float(config_dict.get("steering_weight", 0.05)),
         preference_penalty_weight=float(config_dict.get("preference_penalty_weight", 0.05)),
         heading_reward_weight=float(config_dict.get("heading_reward_weight", 0.5)),
+        terminal_reward_threshold=float(config_dict.get("terminal_reward_threshold", 10.0)),
+        terminal_reward_weight=float(config_dict.get("terminal_reward_weight", 1.0)),
         ref_pos_weight=float(config_dict.get("ref_pos_weight", 0.3)),
         ref_theta1_weight=float(config_dict.get("ref_theta1_weight", 0.5)),
         ref_theta2_weight=float(config_dict.get("ref_theta2_weight", 0.2)),
@@ -186,7 +192,7 @@ def run_diffusion(args=None, env=None):
         env.generate_demonstration_trajectory(search_direction="horizontal", motion_preference=args.motion_preference)
         # Compile the reward function with the demonstration (time this separately)
         reward_compile_start = time.time()
-        env.compile_reward_function()
+        env.compute_demonstration_reward()
         reward_compile_time = time.time() - reward_compile_start
         print(f"Demo trajectory generated with reward: {env.rew_xref:.3f}")
     demo_time = time.time() - demo_start_time
@@ -199,13 +205,14 @@ def run_diffusion(args=None, env=None):
     
     if env_cache_key in _jit_function_cache:
         print(f"Using cached JIT functions for {env_cache_key}")
-        step_env_jit, reset_env_jit, rollout_us_jit = _jit_function_cache[env_cache_key]
+        step_env_jit, reset_env_jit, rollout_us_jit, rollout_us_with_terminal_jit = _jit_function_cache[env_cache_key]
     else:
         print(f"Creating new JIT functions for {env_cache_key}")
         step_env_jit = jax.jit(env.step)
         reset_env_jit = jax.jit(env.reset)
         rollout_us_jit = jax.jit(functools.partial(rollout_us, step_env_jit))
-        _jit_function_cache[env_cache_key] = (step_env_jit, reset_env_jit, rollout_us_jit)
+        rollout_us_with_terminal_jit = jax.jit(functools.partial(rollout_us_with_terminal, step_env_jit, env))
+        _jit_function_cache[env_cache_key] = (step_env_jit, reset_env_jit, rollout_us_jit, rollout_us_with_terminal_jit)
     
     # NOTE: a, b = jax.random.split(b) is a standard way to use random. always use a as random variable, not b. 
     rng, rng_reset = jax.random.split(rng)  # NOTE: rng_reset should never be changed.
@@ -250,6 +257,10 @@ def run_diffusion(args=None, env=None):
         dummy_Y0 = jnp.zeros([args.Hsample, Nu])  # Correct shape for action sequence
         print(f"    dummy_Y0 shape: {dummy_Y0.shape}")
         _, _ = rollout_us_jit(state_init, dummy_Y0)
+        
+        # Warm up rollout_us_with_terminal_jit
+        print("  Warming up rollout_us_with_terminal_jit...")
+        _, _ = rollout_us_with_terminal_jit(state_init, dummy_Y0)
     else:
         print("Skipping warmup - using cached JIT functions")
         warmup_start_time = time.time()
@@ -262,30 +273,30 @@ def run_diffusion(args=None, env=None):
     alphas_bar = jnp.cumprod(alphas)
     sigmas = jnp.sqrt(1 - alphas_bar)
     
-    # Define the steering cost function that will be used in reverse_once
+    # Define the steering reward function that will be used in reverse_once
     @jax.jit
-    def compute_steering_cost(Y0s):
+    def compute_steering_reward(Y0s):
         """
-        Compute trajectory-level steering cost for action sequences.
+        Compute trajectory-level steering reward for action sequences.
         Y0s: (Nsample, Hsample, Nu) where Nu=2 (v, delta)
-        Returns: (Nsample,) steering costs
+        Returns: (Nsample,) steering rewards
         """
         # Extract steering angles (second action dimension)
         deltas = Y0s[:, :, 1]  # Shape: (Nsample, Hsample)
         
-        # Scale to actual steering angles for cost computation
+        # Scale to actual steering angles for reward computation
         deltas_scaled = deltas * env.delta_max
         
-        # 1. Steering magnitude cost: r_delta = 1.0 - (delta_t / delta_max)^2
+        # 1. Steering magnitude reward: r_delta = 1.0 - (delta_t / delta_max)^2
         r_delta = 1.0 - (jnp.abs(deltas) ** 2)  # deltas already normalized to [-1,1]
         
-        # 2. Steering rate cost: r_deltadot = 1.0 - ((delta_t - delta_{t-1}) / (0.1 * delta_max))^2
+        # 2. Steering rate reward: r_deltadot = 1.0 - ((delta_t - delta_{t-1}) / (0.1 * delta_max))^2
         delta_diffs = jnp.diff(deltas_scaled, axis=1)  # Shape: (Nsample, Hsample-1)
         delta_rate_threshold = 0.1 * env.delta_max
         r_deltadot = 1.0 - jnp.clip((jnp.abs(delta_diffs) / delta_rate_threshold) ** 2, 0.0, 1.0)
         
-        # 3. Combined steering cost: r_steer = 0.5 * (r_delta + r_deltadot)
-        # For r_deltadot, pad with 1.0 at the beginning (no rate cost for first timestep)
+        # 3. Combined steering reward: r_steer = 0.5 * (r_delta + r_deltadot)
+        # For r_deltadot, pad with 1.0 at the beginning (no rate reward for first timestep)
         r_deltadot_padded = jnp.concatenate([
             jnp.ones((Y0s.shape[0], 1)), r_deltadot
         ], axis=1)  # Shape: (Nsample, Hsample)
@@ -314,14 +325,40 @@ def run_diffusion(args=None, env=None):
             eps_u = jax.random.normal(Y0s_rng, (args.Nsample, args.Hsample, Nu)) # NOTE: Sample from N(0, I) 
             Y0s = eps_u * sigmas[i]/jnp.sqrt(alphas_bar[i-1]) + Ybar_i # TODO: changed this based on the paper (it seems the original code is wrong)
             Y0s = jnp.clip(Y0s, -1.0, 1.0) # NOTE: clip action to [-1, 1] (it is defined in dynamics)
+            
+            # Apply strict motion enforcement for motion_preference = 2 or -2
+            # For 2: enforce forward only (clip velocity to [0, 1])
+            # For -2: enforce backward only (clip velocity to [-1, 0])
+            velocity_component = Y0s[:, :, 0]
+            
+            # Use JAX conditionals to avoid recompilation
+            # Forward only enforcement (motion_preference = 2)
+            velocity_forward_only = jnp.clip(velocity_component, 0.0, 1.0)
+            
+            # Backward only enforcement (motion_preference = -2)
+            velocity_backward_only = jnp.clip(velocity_component, -1.0, 0.0)
+            
+            # Select appropriate velocity clipping based on motion_preference
+            velocity_final = jnp.where(
+                args.motion_preference == 2,
+                velocity_forward_only,
+                jnp.where(
+                    args.motion_preference == -2,
+                    velocity_backward_only,
+                    velocity_component  # No additional clipping for other values
+                )
+            )
+            
+            # Update Y0s with the modified velocity component
+            Y0s = Y0s.at[:, :, 0].set(velocity_final)
 
             # esitimate mu_0tm1
-            rewss, qs = jax.vmap(rollout_us_jit, in_axes=(None, 0))(state_init, Y0s)
+            rewss, qs = jax.vmap(rollout_us_with_terminal_jit, in_axes=(None, 0))(state_init, Y0s)
             rews = rewss.mean(axis=-1)
             
             # Compute steering cost and blend with geometric rewards
-            r_steer = compute_steering_cost(Y0s)  # Shape: (Nsample,)
-            rews_combined = rews + env.steering_weight * r_steer  # Blend steering cost
+            r_steer = compute_steering_reward(Y0s)  # Shape: (Nsample,)
+            rews_combined = rews + env.steering_weight * r_steer  # Blend steering reward
             
             rew_std = rews_combined.std() # NOTE: scalar
             rew_std = jnp.where(rew_std < 1e-4, 1.0, rew_std) # NOTE: at early stage it is near 0, and increase to 0.1 ish after.
@@ -517,7 +554,7 @@ def run_diffusion(args=None, env=None):
             create_denoising_animation(env, Ybars, args, step_env_jit, state_init, frame_skip=args.frame_skip)
 
     # Optional final reward computation (for display only, not included in timing)
-    rewss_final, _ = rollout_us_jit(state_init, Y0)  # Use Y0
+    rewss_final, _ = rollout_us_with_terminal_jit(state_init, Y0)  # Use Y0
     rew_final = rewss_final.mean()
     
     # Print detailed timing report
@@ -577,6 +614,8 @@ if __name__ == "__main__":
         steering_weight=config.steering_weight,
         preference_penalty_weight=config.preference_penalty_weight,
         heading_reward_weight=config.heading_reward_weight,
+        terminal_reward_threshold=config.terminal_reward_threshold,
+        terminal_reward_weight=config.terminal_reward_weight,
         ref_pos_weight=config.ref_pos_weight,
         ref_theta1_weight=config.ref_theta1_weight,
         ref_theta2_weight=config.ref_theta2_weight
@@ -585,9 +624,11 @@ if __name__ == "__main__":
     # Set initial position using geometric parameters relative to parking lot
     # dx: distance from tractor front face to target parking space center
     # dy: distance from tractor to parking lot entrance line
-    env.set_init_pos(dx=-3.0, dy=1.0, theta1=0, theta2=0)
+    env.set_init_pos(dx=-3.0, dy=4.0, theta1=0, theta2=0)
+    if config.motion_preference == -2:
+        env.set_init_pos(dx=-12.0, dy=1.0, theta1=jnp.pi, theta2=jnp.pi)
     # Set goal angles based on motion preference
-    if config.motion_preference == -1:  # backward parking
+    if config.motion_preference in [-1, -2]:  # backward parking
         env.set_goal_pos(theta1=jnp.pi/2, theta2=jnp.pi/2)  # backward parking
     
     rew_final, Y0, trajectory_states, timing_info = run_diffusion(args=config, env=env)
