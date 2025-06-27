@@ -46,7 +46,7 @@ class TractorTrailer2d:
                  max_w_theta=0.75, hitch_angle_weight=0.2, l1=3.23, l2=2.9, lh=1.15, 
                  tractor_width=2.0, trailer_width=2.5, v_max=3.0, delta_max_deg=55.0,
                  d_thr_factor=1.0, k_switch=2.5, steering_weight=0.05, preference_penalty_weight=0.05,
-                 heading_reward_weight=0.5, ref_pos_weight=0.3, ref_theta1_weight=0.5, ref_theta2_weight=0.2):
+                 heading_reward_weight=0.5, terminal_reward_threshold=10.0, terminal_reward_weight=1.0, ref_pos_weight=0.3, ref_theta1_weight=0.5, ref_theta2_weight=0.2):
         # Time parameters
         self.dt = dt
         self.H = H
@@ -90,6 +90,8 @@ class TractorTrailer2d:
         self.steering_weight = steering_weight  # weight for trajectory-level steering cost
         self.preference_penalty_weight = preference_penalty_weight  # penalty weight for motion preference
         self.heading_reward_weight = heading_reward_weight  # weight for heading reward calculation
+        self.terminal_reward_threshold = terminal_reward_threshold  # position error threshold for terminal reward
+        self.terminal_reward_weight = terminal_reward_weight  # weight for terminal reward at final state
         
 
         
@@ -519,14 +521,20 @@ class TractorTrailer2d:
         
         return self.xref
     
-    def compile_reward_function(self):
+    def compute_demonstration_reward(self):
         """
         Compile the reward function after setting x0, xg, and obstacles.
         This should be called after initialization and any updates to goal/start positions.
         """
         if hasattr(self, 'xref') and self.xref is not None:
             # Compute reference trajectory reward
-            self.rew_xref = jax.vmap(self.get_reward)(self.xref).mean()
+            stage_rewards = jax.vmap(self.get_reward)(self.xref)
+            
+            # Add terminal reward to the final state
+            terminal_reward = self.get_terminal_reward(self.xref[-1])
+            final_reward = stage_rewards.at[-1].add(self.terminal_reward_weight * terminal_reward)
+            
+            self.rew_xref = final_reward.mean()
             print(f"Reference trajectory reward compiled: {self.rew_xref:.3f}")
         else:
             print("Warning: No reference trajectory set. Call generate_demonstration_trajectory first.")
@@ -622,6 +630,69 @@ class TractorTrailer2d:
         # 5. weighted stage cost
         reward = (1.0 - self.hitch_angle_weight)*((1.0 - w_theta) * r_pos + w_theta * r_hdg) + self.hitch_angle_weight * r_art
         return reward
+
+    @partial(jax.jit, static_argnums=(0,))
+    def get_terminal_reward(self, q):
+        """
+        Terminal reward computed at final state without logistic switch.
+        Equal weighting (0.5) for position and heading rewards.
+        """
+        # ---------------------------------------------------------------
+        # 0. convenience shorthands
+        px, py, theta1, theta2 = q
+        thetag = self.xg[2]  # goal heading
+        tractor_pos = jnp.array([px + self.l1 * jnp.cos(theta1), py + self.l1 * jnp.sin(theta1)])
+        tractor_goal = self.xg[:2]
+        
+        # Compute trailer position from current state
+        trailer_pos = self.get_trailer_position(q)
+        
+        # Compute trailer goal position from goal state
+        trailer_goal = self.get_trailer_position(self.xg)
+        
+        # ---------------------------------------------------------------
+        # 1. positional reward - use different position based on preference
+        use_tractor_tracking = (self.motion_preference == 1) | (self.motion_preference == 2)
+        
+        # Compute distances for both cases
+        d_pos_tractor = jnp.linalg.norm(tractor_pos - tractor_goal)
+        d_pos_trailer = jnp.linalg.norm(trailer_pos - trailer_goal)
+        
+        # Select distance based on preference
+        d_pos = jnp.where(use_tractor_tracking, d_pos_tractor, d_pos_trailer)
+        r_pos = 1.0 - (jnp.clip(d_pos, 0., self.terminal_reward_threshold) / self.terminal_reward_threshold) ** 2
+        
+        # ---------------------------------------------------------------
+        # 2. heading-to-goal alignment
+        wrap_pi = lambda a: (a + jnp.pi) % (2.*jnp.pi) - jnp.pi
+        
+        # Handle angle errors based on motion preference
+        e_theta1_direct = wrap_pi(theta1 - thetag)
+        e_theta2_direct = wrap_pi(theta2 - thetag)
+        total_err_direct = jnp.abs(e_theta1_direct) + jnp.abs(e_theta2_direct)
+        
+        # Try offset by π (opposite orientation) 
+        e_theta1_offset = wrap_pi(theta1 - thetag - jnp.pi)
+        e_theta2_offset = wrap_pi(theta2 - thetag - jnp.pi)
+        total_err_offset = jnp.abs(e_theta1_offset) + jnp.abs(e_theta2_offset)
+        
+        # Choose orientation with smaller total error (for no preference case)
+        use_direct = total_err_direct < total_err_offset
+        e_theta1_wrapped = jnp.where(use_direct, e_theta1_direct, e_theta1_offset)
+        e_theta2_wrapped = jnp.where(use_direct, e_theta2_direct, e_theta2_offset)
+        
+        # Select final angles: use wrapping only when no preference, direct otherwise
+        no_preference = self.motion_preference == 0
+        e_theta1 = jnp.where(no_preference, e_theta1_wrapped, e_theta1_direct)
+        e_theta2 = jnp.where(no_preference, e_theta2_wrapped, e_theta2_direct)
+        
+        r_hdg = self.heading_reward_weight * (1.0 - (jnp.abs(e_theta1) / self.theta_max) ** 2
+                      + 1.0 - (jnp.abs(e_theta2) / self.theta_max) ** 2)
+        
+        # ---------------------------------------------------------------
+        # 3. terminal reward with fixed 0.5 weighting (no logistic switch)
+        terminal_reward = 0.5 * r_pos + 0.5 * r_hdg
+        return terminal_reward
 
     
     @partial(jax.jit, static_argnums=(0,))
