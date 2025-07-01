@@ -16,30 +16,32 @@ def eval_us(step_env, state, us):
         state = step_env(state, u)
         return state, state.reward
 
-    _, rews = jax.lax.scan(step, state, us)
-    return rews
+    _, rew_seq = jax.lax.scan(step, state, us)
+    return rew_seq
 
 def rollout_us(step_env, state, us):
     def step(state, u):
         state = step_env(state, u)
         return state, (state.reward, state.pipeline_state)
 
-    final_state, (rews, pipline_states) = jax.lax.scan(step, state, us) # NOTE: returns stack of (rew, pipline_state). _ is the final carry, which is final state in this case
-    return rews, pipline_states
+    final_state, (rew_seq, pipeline_state_seq) = jax.lax.scan(step, state, us) # NOTE: returns stack of (rew, pipeline_state). _ is the final carry, which is final state in this case
+    return rew_seq, pipeline_state_seq
 
 def rollout_us_with_terminal(step_env, env, state, us):
-    """Rollout with terminal reward added to final timestep"""
+    """Rollout with terminal reward computed separately from stage rewards"""
     def step(state, u):
         state = step_env(state, u)
         return state, (state.reward, state.pipeline_state)
 
-    final_state, (rews, pipline_states) = jax.lax.scan(step, state, us)
+    final_state, (rew_seq, pipeline_state_seq) = jax.lax.scan(step, state, us)
     
-    # Add terminal reward to the final timestep
+    # Compute mean of stage rewards first, then add separate terminal reward
+    stage_reward_mean = rew_seq.mean()
     terminal_reward = env.get_terminal_reward(final_state.pipeline_state)
-    rews_with_terminal = rews.at[-1].add(env.terminal_reward_weight * terminal_reward)
+    total_reward = stage_reward_mean + env.terminal_reward_weight * terminal_reward
     
-    return rews_with_terminal, pipline_states
+    # Return total reward instead of per-timestep rewards for consistency with new logic
+    return total_reward, pipeline_state_seq
 
 # def render_us(step_env, sys, state, us):
 #     rollout = []

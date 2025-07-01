@@ -76,8 +76,8 @@ class MBDConfig:
     max_w_theta: float = 0.75  # maximum weight for heading reward vs position reward
     hitch_angle_weight: float = 0.2  # weight for hitch angle (articulation) reward
     # terminal reward
-    terminal_reward_threshold: float = 10.0  # position error threshold for terminal reward
-    terminal_reward_weight: float = 0.05  # weight for terminal reward at final state
+    terminal_reward_threshold: float = 1.0  # position error threshold for terminal reward
+    terminal_reward_weight: float = 1.0  # weight for terminal reward at final state
     # reward shaping parameters
     d_thr_factor: float = 1.0  # multiplier for distance threshold (multiplied by rig length)
     k_switch: float = 2.5  # slope of logistic switch for position/heading reward blending
@@ -354,7 +354,7 @@ def run_diffusion(args=None, env=None):
 
             # esitimate mu_0tm1
             rewss, qs = jax.vmap(rollout_us_with_terminal_jit, in_axes=(None, 0))(state_init, Y0s)
-            rews = rewss.mean(axis=-1)
+            rews = rewss  # rollout_us_with_terminal now returns total reward directly (mean + terminal)
             
             # Compute steering cost and blend with geometric rewards
             r_steer = compute_steering_reward(Y0s)  # Shape: (Nsample,)
@@ -554,8 +554,8 @@ def run_diffusion(args=None, env=None):
             create_denoising_animation(env, Ybars, args, step_env_jit, state_init, frame_skip=args.frame_skip)
 
     # Optional final reward computation (for display only, not included in timing)
-    rewss_final, _ = rollout_us_with_terminal_jit(state_init, Y0)  # Use Y0
-    rew_final = rewss_final.mean()
+    rew_final, _ = rollout_us_with_terminal_jit(state_init, Y0)  # Use Y0
+    # rew_final is already the total reward (mean + terminal), no need to call .mean()
     
     # Print detailed timing report
     print("\n=== TIMING REPORT ===")

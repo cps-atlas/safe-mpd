@@ -505,6 +505,12 @@ class TractorTrailer2d:
             dy = points_2d[i+1, 1] - points_2d[i, 1]
             if np.abs(dx) > 1e-6 or np.abs(dy) > 1e-6:
                 theta = np.arctan2(dy, dx)
+                
+                # Adjust angle based on motion preference
+                if motion_preference in [-1, -2]:  # Backward preference
+                    theta = theta + np.pi  # Add π for backward orientation
+                # For forward preference (1, 2) or no preference (0), use direct angle
+                
             else:
                 # No movement, keep previous angle or use goal angle
                 theta = xref[i-1, 2] if i > 0 else self.xg[2]
@@ -528,13 +534,15 @@ class TractorTrailer2d:
         """
         if hasattr(self, 'xref') and self.xref is not None:
             # Compute reference trajectory reward
+            jax.debug.print("xref: {xref}", xref=self.xref)
             stage_rewards = jax.vmap(self.get_reward)(self.xref)
             
-            # Add terminal reward to the final state
-            terminal_reward = self.get_terminal_reward(self.xref[-1])
-            final_reward = stage_rewards.at[-1].add(self.terminal_reward_weight * terminal_reward)
+            # Compute mean of stage rewards first
+            stage_reward_mean = stage_rewards.mean()
             
-            self.rew_xref = final_reward.mean()
+            # Add separate terminal reward
+            terminal_reward = self.get_terminal_reward(self.xref[-1])
+            self.rew_xref = stage_reward_mean + self.terminal_reward_weight * terminal_reward
             print(f"Reference trajectory reward compiled: {self.rew_xref:.3f}")
         else:
             print("Warning: No reference trajectory set. Call generate_demonstration_trajectory first.")
@@ -589,16 +597,16 @@ class TractorTrailer2d:
         
         # Handle angle errors based on motion preference:
         # - No preference (0): Use angle wrapping to find best orientation (direct vs π-offset)
-        # - Has preference/enforcement (±1, ±2): Goal angles are manually set correctly, use direct difference
-        # Compute both direct and offset angle errors
-        # Try direct angle alignment
+        # - Has preference/enforcement (±1, ±2): Goal angles are set correctly, use direct difference
+        
+        # Compute direct angle differences
         e_theta1_direct = wrap_pi(theta1 - thetag)
         e_theta2_direct = wrap_pi(theta2 - thetag)
-        total_err_direct = jnp.abs(e_theta1_direct) + jnp.abs(e_theta2_direct)
         
-        # Try offset by π (opposite orientation) 
+        # For no preference case, also try opposite orientation
         e_theta1_offset = wrap_pi(theta1 - thetag - jnp.pi)
         e_theta2_offset = wrap_pi(theta2 - thetag - jnp.pi)
+        total_err_direct = jnp.abs(e_theta1_direct) + jnp.abs(e_theta2_direct)
         total_err_offset = jnp.abs(e_theta1_offset) + jnp.abs(e_theta2_offset)
         
         # Choose orientation with smaller total error (for no preference case)
@@ -965,12 +973,6 @@ class TractorTrailer2d:
             use_direct = total_err_direct < total_err_offset
             theta1_err_wrapped = jnp.where(use_direct, theta1_err_direct, theta1_err_offset)
             theta2_err_wrapped = jnp.where(use_direct, theta2_err_direct, theta2_err_offset)
-            
-            # Select final angles: use wrapping only when no preference, direct otherwise
-            no_preference = motion_preference == 0
-            theta1_err = jnp.where(no_preference, theta1_err_wrapped, theta1_err_direct)
-            theta2_err = jnp.where(no_preference, theta2_err_wrapped, theta2_err_direct)
-            
             
             # Select final angles: use wrapping only when no preference, direct otherwise
             no_preference = motion_preference == 0
