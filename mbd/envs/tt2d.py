@@ -452,6 +452,7 @@ class TractorTrailer2d:
         # Discretize path into H+1 points
         num_points = self.H 
         points_2d = []
+        segment_indices = []  # Track which segment each point belongs to
         
         # Calculate how many points per segment based on length
         if total_length > 0:
@@ -480,26 +481,44 @@ class TractorTrailer2d:
                 for t in t_values:
                     point = waypoints[i] + t * (waypoints[i+1] - waypoints[i])
                     points_2d.append(point)
+                    segment_indices.append(i)  # Track which segment this point belongs to
         else:
             # All waypoints are the same, just repeat
             points_2d = [waypoints[0] for _ in range(num_points)]
+            segment_indices = [0] * num_points
         
         # Ensure we have exactly H+1 points
         points_2d = np.array(points_2d)
+        segment_indices = np.array(segment_indices)
+        
         if len(points_2d) > num_points:
             # Downsample
             indices = np.linspace(0, len(points_2d)-1, num_points, dtype=int)
             points_2d = points_2d[indices]
+            segment_indices = segment_indices[indices]
         elif len(points_2d) < num_points:
             # Pad with goal position
             padding = num_points - len(points_2d)
             points_2d = np.vstack([points_2d, np.tile(xg_pos, (padding, 1))])
+            # Pad segment indices with the last segment index (final segment)
+            last_segment_idx = len(waypoints) - 2 if len(waypoints) > 1 else 0
+            segment_indices = np.concatenate([segment_indices, np.full(padding, last_segment_idx)])
         
         # Calculate heading angles based on path direction
         xref = np.zeros((num_points, 4))
         xref[:, :2] = points_2d  # px, py
         
         # Calculate heading angles from consecutive points
+        # Only apply angle constraints on the final segment (last waypoint to goal)
+        
+        # Find which segment is the final one (last waypoint to goal)
+        final_segment_idx = len(waypoints) - 2 if len(waypoints) > 1 else 0
+        print(f"Final segment index: {final_segment_idx} out of {len(waypoints)-1} segments")
+        
+        # Create angle constraint mask: True only for points in the final segment
+        angle_mask = segment_indices == final_segment_idx
+        print(f"Angle constraints will be applied to {np.sum(angle_mask)} out of {len(angle_mask)} points")
+        
         for i in range(num_points-1):
             dx = points_2d[i+1, 0] - points_2d[i, 0]
             dy = points_2d[i+1, 1] - points_2d[i, 1]
@@ -514,9 +533,14 @@ class TractorTrailer2d:
             else:
                 # No movement, keep previous angle or use goal angle
                 theta = xref[i-1, 2] if i > 0 else self.xg[2]
-                
-            xref[i, 2] = theta  # theta1
-            xref[i, 3] = theta  # theta2 (assume aligned)
+            
+            # Only set angles for final segment, use 0.0 for earlier segments
+            if angle_mask[i]:
+                xref[i, 2] = theta  # theta1
+                xref[i, 3] = theta  # theta2 (assume aligned)
+            else:
+                xref[i, 2] = 0.0  # Will be ignored in eval_xref_logpd
+                xref[i, 3] = 0.0  # Will be ignored in eval_xref_logpd
         
         # Last point uses goal angles (as manually set)
         xref[-1, 2] = self.xg[2]
@@ -524,6 +548,7 @@ class TractorTrailer2d:
         
         # Convert to jax array
         self.xref = jnp.array(xref)
+        self.angle_mask = jnp.array(angle_mask)  # Store the angle constraint mask
         
         return self.xref
     
@@ -935,7 +960,7 @@ class TractorTrailer2d:
         
         # JIT-compile the actual computation
         @jax.jit
-        def _eval_xref_logpd(xs, xref, ref_threshold, phi_max, motion_preference, ref_pos_weight, ref_theta1_weight, ref_theta2_weight):
+        def _eval_xref_logpd(xs, xref, angle_mask, ref_threshold, phi_max, motion_preference, ref_pos_weight, ref_theta1_weight, ref_theta2_weight):
             # Position error - use different reference points based on preference
             # Use JAX conditional operations instead of Python if statements
             
@@ -979,6 +1004,10 @@ class TractorTrailer2d:
             theta1_err = jnp.where(no_preference, theta1_err_wrapped, theta1_err_direct)
             theta2_err = jnp.where(no_preference, theta2_err_wrapped, theta2_err_direct)
             
+            # Apply angle mask: set angle errors to 0 where mask is False (no constraint)
+            theta1_err = jnp.where(angle_mask, theta1_err, 0.0)
+            theta2_err = jnp.where(angle_mask, theta2_err, 0.0)
+            
             theta1_logpd = -(jnp.clip(jnp.abs(theta1_err), 0.0, phi_max) / phi_max) ** 2
             theta2_logpd = -(jnp.clip(jnp.abs(theta2_err), 0.0, phi_max) / phi_max) ** 2
             
@@ -989,7 +1018,13 @@ class TractorTrailer2d:
             
             return combined_logpd.mean(axis=-1)
         
-        return _eval_xref_logpd(xs, self.xref, self.ref_reward_threshold, self.phi_max, motion_preference, 
+        # Check if angle mask is available, if not create a default mask (all True)
+        if hasattr(self, 'angle_mask'):
+            angle_mask = self.angle_mask
+        else:
+            angle_mask = jnp.ones(self.xref.shape[0], dtype=bool)  # Default: all points have angle constraints
+        
+        return _eval_xref_logpd(xs, self.xref, angle_mask, self.ref_reward_threshold, self.phi_max, motion_preference, 
                                self.ref_pos_weight, self.ref_theta1_weight, self.ref_theta2_weight)
 
     @property

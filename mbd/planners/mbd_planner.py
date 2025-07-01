@@ -55,7 +55,7 @@ class MBDConfig:
     betaT: float = 1e-2  # final beta
     enable_demo: bool = True
     # movement preference
-    motion_preference: int = 1  # 0=none, 1=forward, -1=backward
+    motion_preference: int = -1  # 0=none, 1=forward, -1=backward
     # collision handling
     collision_penalty: float = 0.15  # penalty applied for obstacle collisions
     enable_collision_projection: bool = True  # whether to project state back on obstacle collision
