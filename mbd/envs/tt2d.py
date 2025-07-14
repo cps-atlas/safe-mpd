@@ -133,8 +133,8 @@ class TractorTrailer2d:
             self.xg = xg
         
             
-        print(f"x0: {self.x0}")
-        print(f"xg: {self.xg}")
+        # print(f"x0: {self.x0}")
+        # print(f"xg: {self.xg}")
         
         # Demonstration trajectory will be generated later using generate_demonstration_trajectory()
         # This allows setting x0, xg, and obstacles before creating the demo
@@ -351,9 +351,12 @@ class TractorTrailer2d:
         """
         import numpy as np
         
+        print(f"Generating NEW demonstration trajectory with motion_preference={motion_preference}")
+        
         # Extract start and goal positions
         x0_pos = self.x0[:2]
         xg_pos = self.xg[:2]
+        print(f"Demo trajectory: x0_pos={x0_pos}, xg_pos={xg_pos}")
         
         # List to store waypoints
         waypoints = [x0_pos]
@@ -372,7 +375,7 @@ class TractorTrailer2d:
                     obs_radius = obs[2]
                     dist = np.linalg.norm(point - obs_center)
                     if dist <= obs_radius:
-                        print(f"Point collision detected with circle at {point}")
+                        #print(f"Point collision detected with circle at {point}")
                         return True
                 
                 # Check if point collides with any rectangular obstacles
@@ -391,7 +394,7 @@ class TractorTrailer2d:
                     
                     # Check if point is inside rectangle bounds
                     if (abs(local_x) <= obs_width / 2 and abs(local_y) <= obs_height / 2):
-                        print(f"Point collision detected with rectangle at {point}")
+                        #print(f"Point collision detected with rectangle at {point}")
                         return True
             
             return False
@@ -399,7 +402,7 @@ class TractorTrailer2d:
         # Try direct path first
         if not check_line_collision(x0_pos, xg_pos):
             # Direct path is clear
-            print("Direct path is clear")
+            #print("Direct path is clear")
             waypoints.append(xg_pos)
         else:
             # Need intermediate waypoints - use perpendicular approach
@@ -415,7 +418,7 @@ class TractorTrailer2d:
                not check_line_collision(intermediate, xg_pos):
                 waypoints.append(intermediate)
                 waypoints.append(xg_pos)
-                print("Perpendicular path is clear")
+                #print("Perpendicular path is clear")
             else:
                 # Try the other direction
                 if search_direction == "horizontal":
@@ -439,7 +442,7 @@ class TractorTrailer2d:
         
         # Convert waypoints to numpy array for easier manipulation
         waypoints = np.array(waypoints)
-        print(f"waypoints: {waypoints}")
+        #print(f"waypoints: {waypoints}")
         
         # Calculate total path length
         path_lengths = []
@@ -550,6 +553,8 @@ class TractorTrailer2d:
         self.xref = jnp.array(xref)
         self.angle_mask = jnp.array(angle_mask)  # Store the angle constraint mask
         
+        print(f"Demo trajectory UPDATED: start=({self.xref[0,0]:.2f},{self.xref[0,1]:.2f}), end=({self.xref[-1,0]:.2f},{self.xref[-1,1]:.2f}), motion_pref={motion_preference}")
+        
         return self.xref
     
     def compute_demonstration_reward(self):
@@ -559,7 +564,7 @@ class TractorTrailer2d:
         """
         if hasattr(self, 'xref') and self.xref is not None:
             # Compute reference trajectory reward
-            jax.debug.print("xref: {xref}", xref=self.xref)
+            #jax.debug.print("xref: {xref}", xref=self.xref)
             stage_rewards = jax.vmap(self.get_reward)(self.xref)
             
             # Compute mean of stage rewards first
@@ -568,7 +573,7 @@ class TractorTrailer2d:
             # Add separate terminal reward
             terminal_reward = self.get_terminal_reward(self.xref[-1])
             self.rew_xref = stage_reward_mean + self.terminal_reward_weight * terminal_reward
-            print(f"Reference trajectory reward compiled: {self.rew_xref:.3f}")
+            #print(f"Reference trajectory reward compiled: {self.rew_xref:.3f}")
         else:
             print("Warning: No reference trajectory set. Call generate_demonstration_trajectory first.")
 
