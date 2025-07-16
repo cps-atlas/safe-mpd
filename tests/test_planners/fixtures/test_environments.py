@@ -3,7 +3,7 @@ Test Environment Setup Utilities
 =========================
 
 This module provides utilities for setting up test environments
-for MBD planner testing, specifically focused on case2 scenarios.
+for MBD planner testing, specifically focused on parking scenarios.
 """
 
 import os
@@ -23,9 +23,9 @@ except ImportError:
     from test_configs import TestConfig
 
 
-def setup_case2_environment(config: TestConfig) -> Env:
+def setup_parking_environment(config: TestConfig) -> Env:
     """
-    Set up a case2 environment with custom obstacles and parking configuration.
+    Set up a parking environment with custom obstacles and parking configuration.
     
     Args:
         config: TestConfig containing environment customizations
@@ -33,9 +33,9 @@ def setup_case2_environment(config: TestConfig) -> Env:
     Returns:
         Env: Configured environment object
     """
-    # Create base case2 environment
+    # Create base parking environment
     parking_config = config.custom_parking_config or None
-    env = Env(case="case2", parking_config=parking_config)
+    env = Env(case="parking", parking_config=parking_config)
     
     # Add custom circular obstacles if specified
     if config.custom_circular_obstacles:
@@ -65,7 +65,7 @@ def create_test_tt2d_environment(config: TestConfig) -> Any:
         TractorTrailer2d environment instance
     """
     # Set up the base environment configuration
-    env_config = setup_case2_environment(config)
+    env_config = setup_parking_environment(config)
     
     # Create TT2D environment with test configuration 
     # Since TestConfig inherits from MBDConfig, pass all parameters from config
@@ -147,7 +147,7 @@ def create_test_tt2d_environment(config: TestConfig) -> Any:
 
 def get_default_parking_config() -> Dict[str, Any]:
     """
-    Get the default parking configuration for case2.
+    Get the default parking configuration for parking scenario.
     
     Returns:
         Dict: Default parking configuration

@@ -11,7 +11,7 @@ Visulization for the diffusion, and some functions for model-based diffusion (or
 
 
 class Env:
-    def __init__(self, width=36.0, height=32.0, case="case1", parking_config=None, resolution=0.1):
+    def __init__(self, width=36.0, height=32.0, case="parking", parking_config=None, resolution=0.1):
         self.width = width
         self.height = height
         self.resolution = resolution
@@ -22,18 +22,15 @@ class Env:
         # Set up obstacles based on case
         self.obs_boundary = self.set_obs_boundary(width, height)
         
-        if case == "case1":
-            self.obs_circle = self.set_obs_circle_case1()
-            self.obs_rectangle = self.set_obs_rectangle_case1()
-        elif case == "case2":
+        if case == "parking":
             if parking_config is None:
                 parking_config = self.get_default_parking_config()
             self.parking_config = parking_config
-            self.obs_circle = self.set_obs_circle_case2(parking_config)
-            self.obs_rectangle = self.set_obs_rectangle_case2()
-        elif case == "case3":
-            # CarMaker test case - obstacles will be set via set_rectangle_obs
-            self.obs_circle = []  # No circular obstacles for case3
+            self.obs_circle = self.set_obs_circle_parking(parking_config)
+            self.obs_rectangle = self.set_obs_rectangle_parking()
+        elif case == "navigation":
+            # Navigation test case - obstacles will be set via set_rectangle_obs
+            self.obs_circle = []  # No circular obstacles for navigation
             self.obs_rectangle = []  # Will be set later via set_rectangle_obs
         else:
             raise ValueError(f"Unknown case: {case}")
@@ -43,7 +40,7 @@ class Env:
             self.obs_circle = [[0.0, 0.0, 0.0]]
 
     def get_default_parking_config(self):
-        """Default parking configuration for case 2"""
+        """Default parking configuration for parking scenario"""
         return {
             'parking_rows': 2,
             'parking_cols': 8,
@@ -68,45 +65,15 @@ class Env:
         """Set rectangular obstacles (deprecated - use case-specific methods)"""
         return []
 
-    def set_obs_rectangle_case1(self):
-        """Set rectangular obstacles for case 1 (navigation scenario)"""
-        # Default rectangular obstacles: [x_center, y_center, width, height, rotation_angle]
-        obs_rectangle = [
-            [-8.0, 8.0, 4.0, 2.0, 0.2],    # Rectangle 1: slightly rotated
-            [6.0, -4.0, 3.0, 6.0, -0.3],   # Rectangle 2: vertical-ish, rotated
-            [0.0, 12.0, 8.0, 1.5, 0.0],    # Rectangle 3: horizontal barrier
-        ]
-        return obs_rectangle
-
-    def set_obs_rectangle_case2(self):
-        """Set rectangular obstacles for case 2 (parking scenario)"""
+    def set_obs_rectangle_parking(self):
+        """Set rectangular obstacles for parking scenario"""
         obs_rectangle = [
             [0.0, -15.0, 10.0, 4.0, 0.0]
         ]
         return obs_rectangle
     
-    def set_obs_circle_case1(self):
-        """Set circular obstacles for case 1 (original scenario)"""
-        # Default obstacle configuration (scaled for 6x environment)
-        r_obs = 1.8
-        obs_cir = [
-            [-r_obs * 3, r_obs * 2, r_obs],
-            [-r_obs * 2, r_obs * 2, r_obs],
-            [-r_obs * 1, r_obs * 2, r_obs],
-            [0.0, r_obs * 2, r_obs],
-            [0.0, r_obs * 1, r_obs],
-            [0.0, 0.0, r_obs],
-            [0.0, -r_obs * 1, r_obs],
-            [-r_obs * 3, -r_obs * 2, r_obs],
-            [-r_obs * 2, -r_obs * 2, r_obs],
-            [-r_obs * 1, -r_obs * 2, r_obs],
-            [0.0, -r_obs * 2, r_obs],
-        ]
-        obs_cir = [[-r_obs * 3, r_obs * 2, r_obs]]
-        return obs_cir
-
-    def set_obs_circle_case2(self, parking_config):
-        """Set circular obstacles for case 2 (parking scenario)"""
+    def set_obs_circle_parking(self, parking_config):
+        """Set circular obstacles for parking scenario"""
         obs_cir = []
         
         # Extract parking configuration
@@ -147,8 +114,8 @@ class Env:
 
     def get_parking_space_center(self, space_num):
         """Get the center coordinates of a specific parking space"""
-        if self.case != "case2":
-            raise ValueError("Parking spaces only available in case2")
+        if self.case != "parking":
+            raise ValueError("Parking spaces only available in parking scenario")
             
         parking_config = self.parking_config
         rows = parking_config['parking_rows']
@@ -176,7 +143,7 @@ class Env:
 
     def get_default_init_pos(self, case):
         """Get default initial position"""
-        if case == "case2":
+        if case == "parking":
             # Start from left top corner
             start_x = self.x_range[0] + 2.0  # Small offset from boundary
             start_y = self.y_range[1] - 2.0  # Small offset from top
@@ -188,7 +155,7 @@ class Env:
 
     def get_default_goal_pos(self, case):
         """Get default goal position"""
-        if case == "case2":
+        if case == "parking":
             target_space = self.parking_config['target_spaces'][0]  # Tractor target (space 9)
             goal_x, goal_y = self.get_parking_space_center(target_space)
             # Goal orientation: facing into the parking space (approximately pi/2 for vertical spaces)
@@ -225,8 +192,8 @@ class Env:
 
     def print_parking_layout(self):
         """Print the parking layout for visualization"""
-        if self.case != "case2":
-            print("Parking layout only available for case2")
+        if self.case != "parking":
+            print("Parking layout only available for parking scenario")
             return
             
         config = self.parking_config
@@ -255,7 +222,7 @@ class Env:
 
     def set_rectangle_obs(self, obstacles, coordinate_mode="left-top", padding=0.0):
         """
-        Set rectangular obstacles for case3 (CarMaker test case)
+        Set rectangular obstacles for navigation scenario
         
         Args:
             obstacles: List of obstacles, each can be:

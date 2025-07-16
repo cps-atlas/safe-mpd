@@ -5,7 +5,7 @@ Test Module for MBD (Model-Based Diffusion) Planner
 This module contains unit tests for the MBD planner functionality including:
 - Integration tests for complete diffusion process
 - Configuration validation tests
-- Case2 scenario-specific tests
+- Parking scenario-specific tests
 - Performance and timing tests
 
 Tests
@@ -13,7 +13,7 @@ Tests
 The following test modules are available:
 - test_mbd_planner: Main integration tests
 - test_mbd_config: Configuration tests  
-- test_mbd_scenarios: Case2 scenario tests
+- test_mbd_scenarios: Parking scenario tests
 - test_mbd_performance: Performance tests
 
 Setup

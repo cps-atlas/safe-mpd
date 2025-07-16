@@ -6,6 +6,10 @@ This module provides the base test class that all MBD planner tests inherit from
 It includes common utilities, validation methods, and test infrastructure.
 """
 
+# TODO: add without demonstratino test cases
+# TODO: add obstacle on top (in some cases)
+# TODO: modify test cases similar to the presentaiotn slides
+
 import os
 import sys
 import time

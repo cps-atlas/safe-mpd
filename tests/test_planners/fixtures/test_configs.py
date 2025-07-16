@@ -66,9 +66,9 @@ class TestConfig(MBDConfig):
 
 # Predefined test scenarios
 TEST_SCENARIOS = {
-    "case2_basic_forward": TestConfig(
-        test_name="case2_basic_forward",
-        description="Basic forward parking in case2 scenario",
+    "parking_basic_forward": TestConfig(
+        test_name="parking_basic_forward",
+        description="Basic forward parking scenario",
         motion_preference=1,
         expected_reward_min=0.3,
         expected_reward_max=2.0,
@@ -80,9 +80,9 @@ TEST_SCENARIOS = {
         goal_theta2=-jnp.pi/2
     ),
     
-    "case2_basic_backward": TestConfig(
-        test_name="case2_basic_backward",
-        description="Basic backward parking in case2 scenario",
+    "parking_basic_backward": TestConfig(
+        test_name="parking_basic_backward",
+        description="Basic backward parking scenario",
         motion_preference=-1,
         expected_reward_min=0.3,
         expected_reward_max=2.0,
@@ -94,9 +94,9 @@ TEST_SCENARIOS = {
         goal_theta2=jnp.pi/2
     ),
     
-    "case2_no_preference": TestConfig(
-        test_name="case2_no_preference",
-        description="Case2 parking with no motion preference",
+    "parking_no_preference": TestConfig(
+        test_name="parking_no_preference",
+        description="Parking with no motion preference",
         motion_preference=0,
         expected_reward_min=0.3,
         expected_reward_max=2.0,
@@ -108,9 +108,9 @@ TEST_SCENARIOS = {
         goal_theta2=-jnp.pi/2
     ),
     
-    "case2_enforce_forward": TestConfig(
-        test_name="case2_enforce_forward",
-        description="Case2 parking with strict forward enforcement",
+    "parking_enforce_forward": TestConfig(
+        test_name="parking_enforce_forward",
+        description="Parking with strict forward enforcement",
         motion_preference=2,
         expected_reward_min=0.3,
         expected_reward_max=2.0,
@@ -122,9 +122,9 @@ TEST_SCENARIOS = {
         goal_theta2=-jnp.pi/2
     ),
     
-    "case2_enforce_backward": TestConfig(
-        test_name="case2_enforce_backward",
-        description="Case2 parking with strict backward enforcement",
+    "parking_enforce_backward": TestConfig(
+        test_name="parking_enforce_backward",
+        description="Parking with strict backward enforcement",
         motion_preference=-2,
         expected_reward_min=0.3,
         expected_reward_max=2.0,

@@ -40,7 +40,7 @@ class TractorTrailer2d:
     Action: [v, delta] - velocity and steering angle
     Input constraint: v ∈ [-1, 1], delta ∈ [-55°, 55°]
     """
-    def __init__(self, x0=None, xg=None, env_config=None, case="case1", dt=0.2, H=50, motion_preference=0, 
+    def __init__(self, x0=None, xg=None, env_config=None, case="parking", dt=0.2, H=50, motion_preference=0, 
                  collision_penalty=0.15, enable_collision_projection=False, hitch_penalty=0.10, 
                  enable_hitch_projection=True, reward_threshold=25.0, ref_reward_threshold=5.0,
                  max_w_theta=0.75, hitch_angle_weight=0.2, l1=3.23, l2=2.9, lh=1.15, 
@@ -111,23 +111,19 @@ class TractorTrailer2d:
         
         # Set initial and goal states based on case and user input
         if x0 is None:
-            if case == "case1":
-                self.set_init_pos()
-            elif case == "case2":
+            if case == "parking":
                 self.x0 = self.env.get_default_init_pos(case=case)
-            elif case == "case3":
-                # For case3, use default but will be overridden by set_init_pos/set_goal_pos calls
+            elif case == "navigation":
+                # For navigation, use default but will be overridden by set_init_pos/set_goal_pos calls
                 self.x0 = jnp.array([0.0, 0.0, 0.0, 0.0])
         else:
             self.x0 = x0
             
         if xg is None:
-            if case == "case1":
-                self.set_goal_pos()
-            elif case == "case2":
+            if case == "parking":
                 self.xg = self.env.get_default_goal_pos(case=case)
-            elif case == "case3":
-                # For case3, use default but will be overridden by set_goal_pos calls
+            elif case == "navigation":
+                # For navigation, use default but will be overridden by set_goal_pos calls
                 self.xg = jnp.array([0.0, 0.0, jnp.pi, jnp.pi])
         else:
             self.xg = xg
@@ -157,13 +153,13 @@ class TractorTrailer2d:
         Set initial position for tractor-trailer.
         
         Args:
-            x, y: Direct coordinates (for case1 or manual positioning)
-            dx, dy: Geometric positioning relative to parking lot (for case2)
+            x, y: Direct coordinates (for manual positioning)
+            dx, dy: Geometric positioning relative to parking lot (for parking scenario)
                 dx: Distance from tractor front face to target parking space center (x-direction)
                 dy: Distance from tractor to parking lot entrance line (y-direction)
             theta1, theta2: Initial orientations for tractor and trailer
         """
-        if hasattr(self.env, 'case') and self.env.case == "case2" and dx is not None and dy is not None:
+        if hasattr(self.env, 'case') and self.env.case == "parking" and dx is not None and dy is not None:
             # Get parking configuration
             config = self.env.parking_config
             target_spaces = config['target_spaces']
@@ -1042,8 +1038,8 @@ class TractorTrailer2d:
 
     def render(self, ax, xs: jnp.ndarray):
         """Render the tractor-trailer system"""
-        # Add parking space boundaries for case2
-        if hasattr(self.env, 'case') and self.env.case == "case2" and hasattr(self.env, 'parking_config'):
+        # Add parking space boundaries for parking scenario
+        if hasattr(self.env, 'case') and self.env.case == "parking" and hasattr(self.env, 'parking_config'):
             config = self.env.parking_config
             rows = config['parking_rows']
             cols = config['parking_cols']

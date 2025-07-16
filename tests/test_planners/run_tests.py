@@ -9,10 +9,10 @@ Usage:
     uv run python run_tests.py                    # Run all tests
     uv run python run_tests.py --single test_name # Run single test
     uv run python run_tests.py --visualize        # Run with visualization enabled
-    uv run python run_tests.py --single test_case2_basic_forward --visualize
+    uv run python run_tests.py --single test_parking_basic_forward --visualize
 
 Examples:
-    uv run python run_tests.py --single test_case2_basic_forward
+    uv run python run_tests.py --single test_parking_basic_forward
     uv run python run_tests.py --visualize
 """
 

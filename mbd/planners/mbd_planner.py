@@ -52,7 +52,7 @@ class MBDConfig:
     seed: int = 0
     # env
     env_name: str = "tt2d"
-    case: str = "case2" # "case1" for original obstacles, "case2" for parking scenario
+    case: str = "parking" # "parking" for parking scenario, "navigation" for navigation scenario
     # diffusion
     Nsample: int = 20000  # number of samples
     Hsample: int = 50  # horizon
