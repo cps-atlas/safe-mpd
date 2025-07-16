@@ -10,6 +10,8 @@ mbd.egg-info/
 *.pyzwz
 results/
 
+temp.sh
+
 mbd/assets/cartpole.xml
 mbd/assets/humanoidrun.xml
 mbd/assets/humanoidstandup.xml

@@ -27,9 +27,9 @@ class TestConfig(MBDConfig):
     # Override only test-specific defaults (keep MBDConfig defaults for core parameters)
     seed: int = 0  # Fixed seed for reproducibility
     render: bool = False  # Turn off rendering for tests by default
-    save_animation: bool = False
-    show_animation: bool = False
-    save_denoising_animation: bool = False
+    save_animation: bool = True
+    show_animation: bool = True
+    save_denoising_animation: bool = True
     
     # Test metadata (additional fields not in MBDConfig)
     test_name: str = ""
