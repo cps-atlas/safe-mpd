@@ -56,7 +56,7 @@ class MBDConfig:
     # diffusion
     Nsample: int = 20000  # number of samples
     Hsample: int = 50  # horizon
-    Ndiffuse: int = 150 # number of diffusion steps
+    Ndiffuse: int = 100 # number of diffusion steps
     temp_sample: float = 0.01  # temperature for sampling
     beta0: float = 1e-5  # initial beta
     betaT: float = 1e-2  # final beta
@@ -89,7 +89,7 @@ class MBDConfig:
     d_thr_factor: float = 1.0  # multiplier for distance threshold (multiplied by rig length)
     k_switch: float = 2.5  # slope of logistic switch for position/heading reward blending
     steering_weight: float = 0.05  # weight for trajectory-level steering cost
-    preference_penalty_weight: float = 0.05  # penalty weight for movement preference
+    preference_penalty_weight: float = 0.5  # penalty weight for movement preference
     heading_reward_weight: float = 0.5  # (should be 0.5 always) weight for heading reward calculation
     # demonstration evaluation weights
     ref_pos_weight: float = 0.3  # position weight in demo evaluation

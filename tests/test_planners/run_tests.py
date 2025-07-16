@@ -24,6 +24,20 @@ from fixtures.test_configs import (
     get_scenario_pairs
 )
 
+ENABLE_VISUALIZATION = False
+
+def setup_visualization():
+    """Setup visualization by monkey-patching test configs"""
+    global ENABLE_VISUALIZATION
+    if ENABLE_VISUALIZATION:
+        print("🎨 Visualization enabled - tests will show animations")
+        from fixtures.test_configs import TEST_SCENARIOS
+        for scenario_name, config in TEST_SCENARIOS.items():
+            config.visualize = True
+            config.render = True
+            config.show_animation = True
+            #print(f"   ✓ Enabled visualization for {scenario_name}")
+
 
 def run_single_test(test_name: str, visualize: bool = False, enable_demo: Optional[bool] = None):
     """
@@ -39,10 +53,16 @@ def run_single_test(test_name: str, visualize: bool = False, enable_demo: Option
     # Create test suite with single test
     suite = unittest.TestSuite()
     test_instance = TestMBDPlanner(test_name)
-    
-    # Override visualization setting if requested
+
+    # Patch the test instance to force visualization if requested (for both demo and non-demo)
     if visualize:
-        print("Visualization enabled for this test")
+        print("Visualization enabled for this test (single mode)")
+        orig_run_scenario_test = test_instance.run_scenario_test
+        def run_scenario_test_with_visualize(*args, **kwargs):
+            # Always force visualize=True, even if already present
+            kwargs['visualize'] = True
+            return orig_run_scenario_test(*args, **kwargs)
+        test_instance.run_scenario_test = run_scenario_test_with_visualize
     
     suite.addTest(test_instance)
     
@@ -158,7 +178,7 @@ def list_tests():
 
 
 def main():
-    """Main entry point for the test runner."""
+    global ENABLE_VISUALIZATION
     parser = argparse.ArgumentParser(description="Run MBD Planner Tests")
     
     # Main action arguments (mutually exclusive)
@@ -182,6 +202,11 @@ def main():
     
     args = parser.parse_args()
     
+    # Set global visualization flag
+    ENABLE_VISUALIZATION = args.visualize
+    # Setup visualization if requested
+    setup_visualization()
+
     # Set up environment
     start_time = time.time()
     
