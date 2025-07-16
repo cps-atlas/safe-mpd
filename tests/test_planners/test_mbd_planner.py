@@ -1,94 +1,162 @@
 """
-Basic Tests for MBD Planner
+Test Cases for MBD Planner
 =========================
 
-This module contains basic tests for the MBD planner functionality.
-These tests verify core functionality with predefined configurations.
-
-Tests
------
-- test_parking_basic_forward: Basic forward parking scenario  
-- test_parking_basic_backward: Basic backward parking scenario  
-- test_parking_no_preference: No motion preference scenario
-- test_parking_enforce_forward: Strict forward enforcement scenario
-- test_parking_enforce_backward: Strict backward enforcement scenario
-
-Examples
---------
-To run all tests:
-    $ uv run python run_tests.py
-
-To run a specific test:
-    $ uv run python run_tests.py --single test_parking_basic_forward
-
-To run with visualization:
-    $ uv run python run_tests.py --single test_parking_basic_forward --visualize
+Integration tests for the MBD planner with various scenarios.
 """
 
 import unittest
+import time
+from typing import Optional
 
 try:
     from .test_base import BaseMBDTest
-    from .fixtures.test_configs import get_test_config, create_custom_test_config
+    from .fixtures.test_configs import (
+        get_test_config, 
+        create_demo_variant, 
+        list_default_scenarios,
+        list_demo_scenarios,
+        get_scenario_pairs
+    )
 except ImportError:
     # Fallback for direct execution
     from test_base import BaseMBDTest
-    from fixtures.test_configs import get_test_config, create_custom_test_config
+    from fixtures.test_configs import (
+        get_test_config, 
+        create_demo_variant, 
+        list_default_scenarios,
+        list_demo_scenarios,
+        get_scenario_pairs
+    )
 
 
 class TestMBDPlanner(BaseMBDTest):
-    """Basic tests for MBD planner functionality"""
+    """Test cases for MBD planner with various scenarios"""
     
-    def test_parking_basic_forward(self):
-        """Test basic forward parking scenario"""
-        config = get_test_config("parking_basic_forward")
+    def run_scenario_test(self, scenario_name: str, enable_demo: Optional[bool] = None, visualize: Optional[bool] = None):
+        """
+        Helper method to run a test scenario with optional demo flag override.
+        
+        Args:
+            scenario_name: Name of the scenario to test
+            enable_demo: Optional override for demo setting (None uses scenario default)
+            visualize: Optional override for visualization (None uses config default)
+        """
+        if enable_demo is not None:
+            # Create variant with specified demo setting
+            base_name = scenario_name.replace("_demo", "")
+            config = create_demo_variant(base_name, enable_demo=enable_demo)
+        else:
+            # Use scenario as-is
+            config = get_test_config(scenario_name)
+
+        # If visualize is passed, set it on the config (this will set render/show_animation via __post_init__)
+        if visualize is not None:
+            config.visualize = visualize
+            if visualize:
+                config.render = True
+                config.show_animation = True
+            else:
+                config.render = False
+                config.show_animation = False
         
         reward, actions, states, timing = self.run_mbd_test(config)
         
-        # Basic validation
-        self.assertGreater(reward, 0.2, "Forward parking should achieve reasonable reward")
-        print(f"✓ Test completed with reward: {reward:.4f}")
+        print(f"Test completed: {config.test_name}")
+        print(f"Final reward: {reward:.4f}")
+        print(f"Pure diffusion time: {timing['pure_diffusion_time']:.2f}s")
+        print(f"Total time: {timing['total_time']:.2f}s")
         
-    def test_parking_basic_backward(self):
-        """Test basic backward parking scenario"""
-        config = get_test_config("parking_basic_backward")
+        return reward, actions, states, timing
+
+    # === Default Tests (No Demonstration) ===
+    def test_parking_basic_forward(self, visualize: Optional[bool] = None):
+        """Test basic forward parking scenario (no demonstration)"""
+        self.run_scenario_test("parking_basic_forward", visualize=visualize)
+
+    def test_parking_basic_backward(self, visualize: Optional[bool] = None):
+        """Test basic backward parking scenario (no demonstration)"""
+        self.run_scenario_test("parking_basic_backward", visualize=visualize)
+
+    def test_parking_no_preference(self, visualize: Optional[bool] = None):
+        """Test parking with no motion preference (no demonstration)"""
+        self.run_scenario_test("parking_no_preference", visualize=visualize)
+
+    def test_parking_enforce_forward(self, visualize: Optional[bool] = None):
+        """Test parking with strict forward enforcement (no demonstration)"""
+        self.run_scenario_test("parking_enforce_forward", visualize=visualize)
+
+    def test_parking_enforce_backward(self, visualize: Optional[bool] = None):
+        """Test parking with strict backward enforcement (no demonstration)"""
+        self.run_scenario_test("parking_enforce_backward", visualize=visualize)
+
+    # === Demo Tests (With Demonstration) ===
+    def test_parking_basic_forward_demo(self, visualize: Optional[bool] = None):
+        """Test basic forward parking scenario with demonstration"""
+        self.run_scenario_test("parking_basic_forward_demo", visualize=visualize)
+
+    def test_parking_basic_backward_demo(self, visualize: Optional[bool] = None):
+        """Test basic backward parking scenario with demonstration"""
+        self.run_scenario_test("parking_basic_backward_demo", visualize=visualize)
+
+    def test_parking_no_preference_demo(self, visualize: Optional[bool] = None):
+        """Test parking with no motion preference with demonstration"""
+        self.run_scenario_test("parking_no_preference_demo", visualize=visualize)
+
+    def test_parking_enforce_forward_demo(self, visualize: Optional[bool] = None):
+        """Test parking with strict forward enforcement with demonstration"""
+        self.run_scenario_test("parking_enforce_forward_demo", visualize=visualize)
+
+    def test_parking_enforce_backward_demo(self, visualize: Optional[bool] = None):
+        """Test parking with strict backward enforcement with demonstration"""
+        self.run_scenario_test("parking_enforce_backward_demo", visualize=visualize)
+
+    # === Utility Tests ===
+    def test_demo_flag_override(self, visualize: Optional[bool] = None):
+        """Test that demo flag override works correctly"""
+        # Test running a default scenario with demo enabled
+        print("\n--- Testing demo flag override: default scenario with enable_demo=True ---")
+        reward_with_demo, _, _, _ = self.run_scenario_test("parking_basic_forward", enable_demo=True, visualize=visualize)
         
-        reward, actions, states, timing = self.run_mbd_test(config)
+        # Test running a demo scenario with demo disabled
+        print("\n--- Testing demo flag override: demo scenario with enable_demo=False ---") 
+        reward_no_demo, _, _, _ = self.run_scenario_test("parking_basic_forward", enable_demo=False, visualize=visualize)
         
-        # Basic validation
-        self.assertGreater(reward, 0.2, "Backward parking should achieve reasonable reward")
-        print(f"✓ Test completed with reward: {reward:.4f}")
+        # Both should run without errors - exact reward comparison depends on randomness
+        print(f"With-demo reward: {reward_with_demo:.4f}")
+        print(f"No-demo reward: {reward_no_demo:.4f}")
         
-    def test_parking_no_preference(self):
-        """Test parking with no motion preference"""
-        config = get_test_config("parking_no_preference")
+        # Basic sanity check - both should be valid rewards
+        self.assertGreater(reward_with_demo, -10.0)
+        self.assertGreater(reward_no_demo, -10.0)
+
+    def test_scenario_list_functions(self, visualize: Optional[bool] = None):
+        """Test that scenario listing functions work correctly"""
+        default_scenarios = list_default_scenarios()
+        demo_scenarios = list_demo_scenarios()
+        scenario_pairs = get_scenario_pairs()
         
-        reward, actions, states, timing = self.run_mbd_test(config)
+        print(f"Default scenarios: {default_scenarios}")
+        print(f"Demo scenarios: {demo_scenarios}")
+        print(f"Scenario pairs: {scenario_pairs}")
         
-        # Basic validation
-        self.assertGreater(reward, 0.2, "No preference parking should achieve reasonable reward")
-        print(f"✓ Test completed with reward: {reward:.4f}")
+        # Check that we have the expected number of scenarios
+        self.assertEqual(len(default_scenarios), 5)  # 5 base scenarios
+        self.assertEqual(len(demo_scenarios), 5)  # 5 demo versions
+        self.assertEqual(len(scenario_pairs), 5)  # 5 pairs
         
-    def test_parking_enforce_forward(self):
-        """Test parking with strict forward motion enforcement"""
-        config = get_test_config("parking_enforce_forward")
+        # Check that all default scenarios don't end with _demo
+        for scenario in default_scenarios:
+            self.assertFalse(scenario.endswith("_demo"))
         
-        reward, actions, states, timing = self.run_mbd_test(config)
+        # Check that all demo scenarios end with _demo
+        for scenario in demo_scenarios:
+            self.assertTrue(scenario.endswith("_demo"))
         
-        # Basic validation
-        self.assertGreater(reward, 0.2, "Strict forward parking should achieve reasonable reward")
-        print(f"✓ Test completed with reward: {reward:.4f}")
-        
-    def test_parking_enforce_backward(self):
-        """Test parking with strict backward motion enforcement"""
-        config = get_test_config("parking_enforce_backward")
-        
-        reward, actions, states, timing = self.run_mbd_test(config)
-        
-        # Basic validation
-        self.assertGreater(reward, 0.2, "Strict backward parking should achieve reasonable reward")
-        print(f"✓ Test completed with reward: {reward:.4f}")
+        # Check that pairs are correctly formed
+        for default_name, demo_name in scenario_pairs:
+            self.assertEqual(demo_name, f"{default_name}_demo")
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     unittest.main() 

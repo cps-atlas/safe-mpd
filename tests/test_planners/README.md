@@ -1,232 +1,271 @@
-# MBD Planner Tests
+# MBD Planner Test Suite
 
-This directory contains comprehensive tests for the Model-Based Diffusion (MBD) planner functionality.
+This directory contains comprehensive tests for the Model-Based Diffusion (MBD) planner with support for both default (no demonstration) and demonstration-enabled scenarios.
 
-## Directory Structure
+## Test Structure
 
-```
-tests/test_planners/
-├── __init__.py                     # Module initialization
-├── README.md                       # This file
-├── run_tests.py                    # Test runner script
-├── test_base.py                    # Base test class
-├── test_mbd_planner.py            # Main integration tests
-├── fixtures/                       # Test configurations and utilities
-│   ├── __init__.py
-│   ├── test_configs.py             # TestConfig dataclass and scenarios
-│   └── test_environments.py        # Environment setup utilities
-└── results/                        # Test results (created during test runs)
-    ├── {test_name}_result.json     # JSON result files
-    └── {test_name}_arrays.npz      # Numpy arrays (actions, states)
-```
+### Test Categories
+
+1. **Default Tests**: Tests that rely purely on the reward function without demonstration guidance (default behavior)
+2. **Demo Tests**: Tests that use demonstration trajectories to guide the diffusion process (special case)
+3. **Utility Tests**: Tests for configuration management and test infrastructure
+
+### Available Test Scenarios
+
+Each scenario has both default (no demo) and demo variants:
+
+- `parking_basic_forward` / `parking_basic_forward_demo`: Basic forward parking
+- `parking_basic_backward` / `parking_basic_backward_demo`: Basic backward parking  
+- `parking_no_preference` / `parking_no_preference_demo`: No motion preference
+- `parking_enforce_forward` / `parking_enforce_forward_demo`: Strict forward enforcement
+- `parking_enforce_backward` / `parking_enforce_backward_demo`: Strict backward enforcement
 
 ## Running Tests
 
-### Quick Start
+### Prerequisites
 
+Make sure you're in the MBD source directory:
 ```bash
-# Run all tests
-python -m unittest tests.test_planners
-
-# Run specific test module
-python -m unittest tests.test_planners.test_mbd_planner
-
-# Run single test
-python -m unittest tests.test_planners.test_mbd_planner.TestMBDPlanner.test_basic_forward_parking
+cd src/model-based-diffusion
 ```
 
-### Using the Test Runner Script
-
+### Run Default Tests (No Demonstration)
 ```bash
-cd tests/test_planners
+# Default behavior - no flags needed
+python tests/test_planners/run_tests.py
 
-# Run all tests
-python run_tests.py
-
-# Run fast subset (smaller configurations)
-python run_tests.py --fast
-
-# Run single test
-python run_tests.py --single test_basic_forward_parking
-
-# List available tests
-python run_tests.py --list
+# Or explicitly
+python tests/test_planners/run_tests.py --default
 ```
 
-## Test Categories
+### Run Demo Tests (With Demonstration)
+```bash
+python tests/test_planners/run_tests.py --demo
+```
 
-### Integration Tests (`test_mbd_planner.py`)
+### Run All Tests
+```bash
+python tests/test_planners/run_tests.py --all
+```
 
-- **test_basic_forward_parking**: Basic forward parking in case2 scenario
-- **test_basic_backward_parking**: Basic backward parking in case2 scenario  
-- **test_no_motion_preference**: Parking with no motion preference
-- **test_demo_enabled_vs_disabled**: Compare results with/without demonstration
-- **test_jit_compilation_timing**: Test JIT compilation behavior and caching
-- **test_different_sample_sizes**: Test diffusion with different sample sizes
+### Run Single Test
+```bash
+# Default version (no demo)
+python tests/test_planners/run_tests.py --single test_parking_basic_forward
+
+# Demo version
+python tests/test_planners/run_tests.py --single test_parking_basic_forward_demo
+```
+
+### Compare Default vs Demo
+```bash
+python tests/test_planners/run_tests.py --compare parking_basic_forward
+```
+
+### Enable Visualization
+```bash
+python tests/test_planners/run_tests.py --single test_parking_basic_forward --visualize
+```
+
+### List Available Tests
+```bash
+python tests/test_planners/run_tests.py --list
+```
 
 ## Test Configuration
 
-Tests use the `TestConfig` dataclass defined in `fixtures/test_configs.py`. Key parameters:
+### TestConfig Class
+
+The `TestConfig` class extends `MBDConfig` with test-specific fields:
 
 ```python
 @dataclass
-class TestConfig:
+class TestConfig(MBDConfig):
     # Test metadata
-    test_name: str
-    description: str
-    expected_reward_min: float
-    expected_reward_max: float
-    
-    # MBD parameters (optimized for testing)
-    seed: int = 42                  # Fixed for reproducibility
-    Nsample: int = 1000            # Smaller than production
-    Hsample: int = 25              # Shorter horizon
-    Ndiffuse: int = 50             # Fewer diffusion steps
-    enable_demo: bool = True
-    motion_preference: int = 0     # 0=none, ±1=preference, ±2=enforce
+    test_name: str = ""
+    description: str = ""
+    expected_reward_min: float = -1.0
+    expected_reward_max: float = 1.0
+    timeout_seconds: float = 300
+    visualize: bool = False
+    enable_demo: bool = False  # NO DEMO BY DEFAULT
     
     # Environment customization
-    custom_init_pos: Optional[Tuple] = None
-    custom_goal_pos: Optional[Tuple] = None
     custom_circular_obstacles: Optional[List] = None
     custom_rectangular_obstacles: Optional[List] = None
+    custom_parking_config: Optional[Dict] = None
     
-    # Validation criteria
-    min_final_distance_to_goal: float = 2.0
-    max_hitch_angle_violation: float = 0.1
+    # Initial/goal positions using geometric parameters
+    init_dx: Optional[float] = None
+    init_dy: Optional[float] = None
+    init_theta1: Optional[float] = None
+    init_theta2: Optional[float] = None
+    goal_theta1: Optional[float] = None
+    goal_theta2: Optional[float] = None
 ```
 
-### Predefined Scenarios
-
-Available in `TEST_SCENARIOS` dictionary:
-
-- `case2_basic_forward`: Forward parking scenario
-- `case2_basic_backward`: Backward parking scenario
-- `case2_no_preference`: No motion preference scenario
-
-## Test Results and Reproducibility
-
-### Result Files
-
-Each test run generates:
-
-1. **JSON Result File** (`{test_name}_result.json`):
-   ```json
-   {
-     "config": {...},
-     "reward": 0.7234,
-     "final_state": [x, y, theta1, theta2],
-     "timing": {...},
-     "timestamp": "2025-01-01T12:00:00",
-     "git_commit": "abc123def",
-     "test_summary": {
-       "goal_distance": 1.23,
-       "max_hitch_violation": 0.05,
-       "trajectory_length": 26,
-       "action_sequence_length": 25
-     }
-   }
-   ```
-
-2. **Numpy Arrays** (`{test_name}_arrays.npz`):
-   - `actions`: Action sequence array (Hsample, 2)
-   - `states`: State trajectory array (Hsample+1, 4)
-
-### Reproducibility
-
-Tests are designed for reproducibility:
-
-- **Fixed Seeds**: All tests use `seed=42` by default
-- **Git Commit Tracking**: Results include current git commit hash
-- **Configuration Serialization**: Complete test configuration saved
-- **Deterministic Parameters**: Consistent MBD and environment parameters
-
-## Reproducing Results for Presentations
-
-### Command Format for Slides
-
-For each result in presentation slides:
-
-```bash
-# Example: Case2 Forward Parking Test
-git checkout abc123def
-cd tests/test_planners
-python run_tests.py --single test_basic_forward_parking
-```
-
-### Expected Results
-
-Each test has defined expected ranges:
-
-- **Forward Parking**: Reward 0.4-1.0, Goal distance < 2.0m
-- **Backward Parking**: Reward 0.3-1.0, Goal distance < 2.0m  
-- **No Preference**: Reward 0.3-1.0, Goal distance < 2.0m
-
-## Adding New Tests
-
-### 1. Define Test Configuration
-
-Add to `fixtures/test_configs.py`:
+### Creating Custom Test Configurations
 
 ```python
-"new_scenario": TestConfig(
-    test_name="new_scenario",
-    description="Description of test scenario",
-    motion_preference=1,
-    expected_reward_min=0.3,
-    expected_reward_max=0.8,
-    custom_init_pos=(-5, -3, 0, 0),
-    custom_goal_pos=(5, 5, np.pi/2, np.pi/2)
+from fixtures.test_configs import create_demo_variant, create_custom_test_config
+
+# Create demo variant from default scenario
+config = create_demo_variant("parking_basic_forward", enable_demo=True)
+
+# Create custom configuration
+config = create_custom_test_config(
+    "parking_basic_forward",
+    Nsample=1000,
+    Hsample=30,
+    motion_preference=-1,
+    visualize=True
 )
 ```
 
-### 2. Create Test Method
+## Environment Setup
 
-Add to `test_mbd_planner.py`:
+### Parking Scenario Configuration
+
+The parking scenario uses a geometric positioning system:
+
+- `init_dx`: Distance from tractor front face to target parking space center (x-direction)
+- `init_dy`: Distance from tractor to parking lot entrance line (y-direction)
+- `init_theta1`, `init_theta2`: Initial orientations for tractor and trailer
+- `goal_theta1`, `goal_theta2`: Goal orientations (positions determined by target parking space)
+
+### Custom Obstacles
 
 ```python
-def test_new_scenario(self):
-    """Test description"""
-    config = get_test_config("new_scenario")
-    reward, actions, states, timing = self.run_mbd_test(config)
-    
-    # Additional specific validations
-    self.assertGreater(reward, 0.3, "Custom validation message")
+config = TestConfig(
+    custom_circular_obstacles=[
+        [x, y, radius],  # Additional circular obstacles
+        [2.0, 3.0, 1.0]
+    ],
+    custom_rectangular_obstacles=[
+        [x, y, width, height, angle],  # Additional rectangular obstacles
+        [5.0, 2.0, 2.0, 1.0, 0.0]
+    ]
+)
 ```
 
-### 3. Custom Environment Setup
+## Test Results
 
-Modify `fixtures/test_environments.py` if needed for special environment configurations.
+### Output Files
 
-## Test Performance
+Test results are saved in `tests/test_planners/results/`:
+- `{test_name}_result.json`: Test metadata and timing information
+- `{test_name}_arrays.npz`: Action and state trajectories
 
-Typical test execution times:
+### Result Validation
 
-- **Single basic test**: ~15-30 seconds
-- **Fast test suite**: ~2-3 minutes
-- **Full test suite**: ~10-15 minutes
+Each test validates:
+- Reward within expected bounds
+- Proper array dimensions
+- Goal distance criteria
+- Execution within timeout
 
-Tests use smaller configurations than production (1000 samples vs 20000, 25 horizon vs 50, 50 diffusion steps vs 150) for faster execution while maintaining test validity.
+## Development Guide
+
+### Adding New Test Scenarios
+
+1. **Add to TEST_SCENARIOS** in `fixtures/test_configs.py` (no demo by default):
+```python
+"new_scenario": TestConfig(
+    test_name="new_scenario",
+    description="Description of new scenario",
+    enable_demo=False,  # Default
+    expected_reward_min=0.1,  # Lower expectations without demo
+    # ... other configuration parameters
+)
+```
+
+2. **Add test methods** in `test_mbd_planner.py`:
+```python
+def test_new_scenario(self):
+    """Test new scenario (no demonstration)"""
+    self.run_scenario_test("new_scenario")
+
+def test_new_scenario_demo(self):
+    """Test new scenario with demonstration"""
+    self.run_scenario_test("new_scenario_demo")
+```
+
+The demo variant is automatically created by the configuration system.
+
+### Custom Test Environments
+
+```python
+from fixtures.test_environments import create_test_tt2d_environment
+
+def test_custom_environment(self):
+    config = TestConfig(
+        test_name="custom_test",
+        enable_demo=False,  # Default
+        custom_circular_obstacles=[[0, 0, 2.0]],
+        init_dx=-5.0,
+        init_dy=3.0
+    )
+    
+    env = create_test_tt2d_environment(config)
+    # ... run test
+```
 
 ## Troubleshooting
 
 ### Common Issues
 
-1. **Import Errors**: Ensure MBD source path is correctly added
-2. **JAX Compilation**: First test run includes JIT compilation overhead
-3. **Memory Issues**: Reduce `Nsample`, `Hsample`, or `Ndiffuse` for resource-constrained systems
-4. **Timeout Errors**: Increase `timeout_seconds` in test configuration
+1. **JAX Compilation Warnings**: Normal for first run, cached afterwards
+2. **Test Timeout**: Increase `timeout_seconds` in TestConfig
+3. **Visualization Not Showing**: Make sure X11 forwarding is enabled if using SSH
+4. **Import Errors**: Ensure you're running from the correct directory
 
 ### Debug Mode
 
-For detailed output:
-
+Enable verbose output:
 ```bash
-python -m unittest tests.test_planners.test_mbd_planner -v
+python tests/test_planners/run_tests.py --single test_name --visualize
 ```
 
-### Clearing Results
+### Performance Tips
 
+- Default tests (no demo) are faster and good for development
+- Use demo tests to evaluate demonstration effectiveness
+- Run single tests during debugging
+- Use `--compare` to evaluate default vs demo performance
+- Enable visualization only when needed
+
+## Integration with CI/CD
+
+### Quick Test Suite
 ```bash
-rm -rf tests/test_planners/results/*
-``` 
+# Fast default tests (no demonstration)
+python tests/test_planners/run_tests.py
+
+# Demo tests for performance comparison
+python tests/test_planners/run_tests.py --demo
+
+# Full test suite
+python tests/test_planners/run_tests.py --all
+```
+
+### Test Behavior
+
+- **Default behavior** (no flags): Run default tests (no demonstration) - fastest
+- **--demo**: Run demo tests (with demonstration) - slower but better performance
+- **--all**: Run everything (default + demo + utility) - comprehensive
+
+### Expected Test Times
+- Single test: ~30-60 seconds
+- Default tests: ~3-5 minutes total (faster without demo)
+- Demo tests: ~5-10 minutes total (slower with demo generation)
+- All tests: ~8-15 minutes total
+
+## Design Philosophy
+
+The test suite follows the principle that **no demonstration should be the default behavior**:
+
+1. **Baseline Performance**: Default tests establish baseline performance without demonstration
+2. **Enhanced Performance**: Demo tests show the benefit of demonstration guidance
+3. **Easy Comparison**: Simple comparison between default and demo variants
+4. **Development Focus**: Developers typically work with faster default tests
+5. **Production Evaluation**: Demo tests validate demonstration effectiveness 
