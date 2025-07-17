@@ -132,16 +132,16 @@ def benchmark_diffusion(args=None, env=None, num_trials=5, warmup_trials=1):
     return benchmark_results
 
 
-def benchmark_case2_parking():
-    """Benchmark the parking scenario (case2) with different configurations"""
+def benchmark_parking_scenario():
+    """Benchmark the parking scenario with different configurations"""
     
-    print("Benchmarking Tractor-Trailer Parking (Case2)")
+    print("Benchmarking Tractor-Trailer Parking")
     print("=" * 50)
     
     # Base configuration for parking scenario
     base_config = MBDConfig(
         env_name="tt2d",
-        case="case2", 
+        case="parking", 
         motion_preference=-1,  # backward parking
         enable_demo=True,
         render=False,  # Disable rendering for benchmarking
@@ -262,7 +262,7 @@ if __name__ == "__main__":
     print("\n" + "="*60) 
     print("MULTI-CONFIGURATION COMPARISON")
     print("="*60)
-    comparison_results = benchmark_case2_parking()
+    comparison_results = benchmark_parking_scenario()
     
     print(f"\nBenchmarking completed!")
     print(f"Key takeaway: Use 'pure_diffusion_time' for performance comparisons")

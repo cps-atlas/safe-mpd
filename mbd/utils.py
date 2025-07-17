@@ -143,8 +143,8 @@ def create_animation(env, trajectory_states, trajectory_actions, args):
     ax.set_title("Tractor-Trailer Parking")
 
     
-    # Add parking space boundaries for case2
-    if args.case == "case2" and hasattr(env.env, 'parking_config'):
+    # Add parking space boundaries for parking scenario
+    if args.case == "parking" and hasattr(env.env, 'parking_config'):
         config = env.env.parking_config
         rows = config['parking_rows']
         cols = config['parking_cols']
@@ -300,8 +300,8 @@ def create_denoising_animation(env, Yi, args, step_env_jit, state_init, frame_sk
     ax.set_aspect('equal')
     #ax.grid(True)
     
-    # Add parking space boundaries for case2
-    if args.case == "case2" and hasattr(env.env, 'parking_config'):
+    # Add parking space boundaries for parking scenario
+    if args.case == "parking" and hasattr(env.env, 'parking_config'):
         config = env.env.parking_config
         rows = config['parking_rows']
         cols = config['parking_cols']

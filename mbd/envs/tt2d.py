@@ -40,7 +40,7 @@ class TractorTrailer2d:
     Action: [v, delta] - velocity and steering angle
     Input constraint: v ∈ [-1, 1], delta ∈ [-55°, 55°]
     """
-    def __init__(self, x0=None, xg=None, env_config=None, case="case1", dt=0.2, H=50, motion_preference=0, 
+    def __init__(self, x0=None, xg=None, env_config=None, case="parking", dt=0.2, H=50, motion_preference=0, 
                  collision_penalty=0.15, enable_collision_projection=False, hitch_penalty=0.10, 
                  enable_hitch_projection=True, reward_threshold=25.0, ref_reward_threshold=5.0,
                  max_w_theta=0.75, hitch_angle_weight=0.2, l1=3.23, l2=2.9, lh=1.15, 
@@ -111,30 +111,26 @@ class TractorTrailer2d:
         
         # Set initial and goal states based on case and user input
         if x0 is None:
-            if case == "case1":
-                self.set_init_pos()
-            elif case == "case2":
+            if case == "parking":
                 self.x0 = self.env.get_default_init_pos(case=case)
-            elif case == "case3":
-                # For case3, use default but will be overridden by set_init_pos/set_goal_pos calls
+            elif case == "navigation":
+                # For navigation, use default but will be overridden by set_init_pos/set_goal_pos calls
                 self.x0 = jnp.array([0.0, 0.0, 0.0, 0.0])
         else:
             self.x0 = x0
             
         if xg is None:
-            if case == "case1":
-                self.set_goal_pos()
-            elif case == "case2":
+            if case == "parking":
                 self.xg = self.env.get_default_goal_pos(case=case)
-            elif case == "case3":
-                # For case3, use default but will be overridden by set_goal_pos calls
+            elif case == "navigation":
+                # For navigation, use default but will be overridden by set_goal_pos calls
                 self.xg = jnp.array([0.0, 0.0, jnp.pi, jnp.pi])
         else:
             self.xg = xg
         
             
-        print(f"x0: {self.x0}")
-        print(f"xg: {self.xg}")
+        # print(f"x0: {self.x0}")
+        # print(f"xg: {self.xg}")
         
         # Demonstration trajectory will be generated later using generate_demonstration_trajectory()
         # This allows setting x0, xg, and obstacles before creating the demo
@@ -157,13 +153,13 @@ class TractorTrailer2d:
         Set initial position for tractor-trailer.
         
         Args:
-            x, y: Direct coordinates (for case1 or manual positioning)
-            dx, dy: Geometric positioning relative to parking lot (for case2)
+            x, y: Direct coordinates (for manual positioning)
+            dx, dy: Geometric positioning relative to parking lot (for parking scenario)
                 dx: Distance from tractor front face to target parking space center (x-direction)
                 dy: Distance from tractor to parking lot entrance line (y-direction)
             theta1, theta2: Initial orientations for tractor and trailer
         """
-        if hasattr(self.env, 'case') and self.env.case == "case2" and dx is not None and dy is not None:
+        if hasattr(self.env, 'case') and self.env.case == "parking" and dx is not None and dy is not None:
             # Get parking configuration
             config = self.env.parking_config
             target_spaces = config['target_spaces']
@@ -351,9 +347,12 @@ class TractorTrailer2d:
         """
         import numpy as np
         
+        print(f"Generating NEW demonstration trajectory with motion_preference={motion_preference}")
+        
         # Extract start and goal positions
         x0_pos = self.x0[:2]
         xg_pos = self.xg[:2]
+        print(f"Demo trajectory: x0_pos={x0_pos}, xg_pos={xg_pos}")
         
         # List to store waypoints
         waypoints = [x0_pos]
@@ -372,7 +371,7 @@ class TractorTrailer2d:
                     obs_radius = obs[2]
                     dist = np.linalg.norm(point - obs_center)
                     if dist <= obs_radius:
-                        print(f"Point collision detected with circle at {point}")
+                        #print(f"Point collision detected with circle at {point}")
                         return True
                 
                 # Check if point collides with any rectangular obstacles
@@ -391,7 +390,7 @@ class TractorTrailer2d:
                     
                     # Check if point is inside rectangle bounds
                     if (abs(local_x) <= obs_width / 2 and abs(local_y) <= obs_height / 2):
-                        print(f"Point collision detected with rectangle at {point}")
+                        #print(f"Point collision detected with rectangle at {point}")
                         return True
             
             return False
@@ -399,7 +398,7 @@ class TractorTrailer2d:
         # Try direct path first
         if not check_line_collision(x0_pos, xg_pos):
             # Direct path is clear
-            print("Direct path is clear")
+            #print("Direct path is clear")
             waypoints.append(xg_pos)
         else:
             # Need intermediate waypoints - use perpendicular approach
@@ -415,7 +414,7 @@ class TractorTrailer2d:
                not check_line_collision(intermediate, xg_pos):
                 waypoints.append(intermediate)
                 waypoints.append(xg_pos)
-                print("Perpendicular path is clear")
+                #print("Perpendicular path is clear")
             else:
                 # Try the other direction
                 if search_direction == "horizontal":
@@ -439,7 +438,7 @@ class TractorTrailer2d:
         
         # Convert waypoints to numpy array for easier manipulation
         waypoints = np.array(waypoints)
-        print(f"waypoints: {waypoints}")
+        #print(f"waypoints: {waypoints}")
         
         # Calculate total path length
         path_lengths = []
@@ -550,6 +549,8 @@ class TractorTrailer2d:
         self.xref = jnp.array(xref)
         self.angle_mask = jnp.array(angle_mask)  # Store the angle constraint mask
         
+        print(f"Demo trajectory UPDATED: start=({self.xref[0,0]:.2f},{self.xref[0,1]:.2f}), end=({self.xref[-1,0]:.2f},{self.xref[-1,1]:.2f}), motion_pref={motion_preference}")
+        
         return self.xref
     
     def compute_demonstration_reward(self):
@@ -559,7 +560,7 @@ class TractorTrailer2d:
         """
         if hasattr(self, 'xref') and self.xref is not None:
             # Compute reference trajectory reward
-            jax.debug.print("xref: {xref}", xref=self.xref)
+            #jax.debug.print("xref: {xref}", xref=self.xref)
             stage_rewards = jax.vmap(self.get_reward)(self.xref)
             
             # Compute mean of stage rewards first
@@ -568,7 +569,7 @@ class TractorTrailer2d:
             # Add separate terminal reward
             terminal_reward = self.get_terminal_reward(self.xref[-1])
             self.rew_xref = stage_reward_mean + self.terminal_reward_weight * terminal_reward
-            print(f"Reference trajectory reward compiled: {self.rew_xref:.3f}")
+            #print(f"Reference trajectory reward compiled: {self.rew_xref:.3f}")
         else:
             print("Warning: No reference trajectory set. Call generate_demonstration_trajectory first.")
 
@@ -1037,8 +1038,8 @@ class TractorTrailer2d:
 
     def render(self, ax, xs: jnp.ndarray):
         """Render the tractor-trailer system"""
-        # Add parking space boundaries for case2
-        if hasattr(self.env, 'case') and self.env.case == "case2" and hasattr(self.env, 'parking_config'):
+        # Add parking space boundaries for parking scenario
+        if hasattr(self.env, 'case') and self.env.case == "parking" and hasattr(self.env, 'parking_config'):
             config = self.env.parking_config
             rows = config['parking_rows']
             cols = config['parking_cols']
