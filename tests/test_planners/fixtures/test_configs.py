@@ -28,9 +28,9 @@ class TestConfig(MBDConfig):
     # Override only test-specific defaults (keep MBDConfig defaults for core parameters)
     seed: int = 0  # Fixed seed for reproducibility
     render: bool = False  # Turn off rendering for tests by default
-    save_animation: bool = False
+    save_animation: bool = True
     show_animation: bool = False
-    save_denoising_animation: bool = False
+    save_denoising_animation: bool = True
     verbose: bool = False
     
     # Test metadata (additional fields not in MBDConfig)
@@ -196,7 +196,7 @@ ACC_TEST_SCENARIOS = {
         motion_preference=0,
         expected_reward_min=0.3,
         expected_reward_max=2.0,
-        init_dx=3.0,
+        init_dx=2.0,
         init_dy=1.0,
         init_theta1=0.0,
         init_theta2=0.0,
