@@ -727,36 +727,36 @@ class TractorTrailer2d:
         d_pos = jnp.where(use_tractor_tracking, d_pos_tractor, d_pos_trailer)
         r_pos = 1.0 - (jnp.clip(d_pos, 0., self.terminal_reward_threshold) / self.terminal_reward_threshold) ** 2
         
+        # # ---------------------------------------------------------------
+        # # 2. heading-to-goal alignment
+        # wrap_pi = lambda a: (a + jnp.pi) % (2.*jnp.pi) - jnp.pi
+        
+        # # Handle angle errors based on motion preference
+        # e_theta1_direct = wrap_pi(theta1 - thetag)
+        # e_theta2_direct = wrap_pi(theta2 - thetag)
+        # total_err_direct = jnp.abs(e_theta1_direct) + jnp.abs(e_theta2_direct)
+        
+        # # Try offset by π (opposite orientation) 
+        # e_theta1_offset = wrap_pi(theta1 - thetag - jnp.pi)
+        # e_theta2_offset = wrap_pi(theta2 - thetag - jnp.pi)
+        # total_err_offset = jnp.abs(e_theta1_offset) + jnp.abs(e_theta2_offset)
+        
+        # # Choose orientation with smaller total error (for no preference case)
+        # use_direct = total_err_direct < total_err_offset
+        # e_theta1_wrapped = jnp.where(use_direct, e_theta1_direct, e_theta1_offset)
+        # e_theta2_wrapped = jnp.where(use_direct, e_theta2_direct, e_theta2_offset)
+        
+        # # Select final angles: use wrapping only when no preference, direct otherwise
+        # no_preference = self.motion_preference == 0
+        # e_theta1 = jnp.where(no_preference, e_theta1_wrapped, e_theta1_direct)
+        # e_theta2 = jnp.where(no_preference, e_theta2_wrapped, e_theta2_direct)
+        
+        # r_hdg = self.heading_reward_weight * (1.0 - (jnp.abs(e_theta1) / self.theta_max) ** 2
+        #               + 1.0 - (jnp.abs(e_theta2) / self.theta_max) ** 2)
+        
         # ---------------------------------------------------------------
-        # 2. heading-to-goal alignment
-        wrap_pi = lambda a: (a + jnp.pi) % (2.*jnp.pi) - jnp.pi
-        
-        # Handle angle errors based on motion preference
-        e_theta1_direct = wrap_pi(theta1 - thetag)
-        e_theta2_direct = wrap_pi(theta2 - thetag)
-        total_err_direct = jnp.abs(e_theta1_direct) + jnp.abs(e_theta2_direct)
-        
-        # Try offset by π (opposite orientation) 
-        e_theta1_offset = wrap_pi(theta1 - thetag - jnp.pi)
-        e_theta2_offset = wrap_pi(theta2 - thetag - jnp.pi)
-        total_err_offset = jnp.abs(e_theta1_offset) + jnp.abs(e_theta2_offset)
-        
-        # Choose orientation with smaller total error (for no preference case)
-        use_direct = total_err_direct < total_err_offset
-        e_theta1_wrapped = jnp.where(use_direct, e_theta1_direct, e_theta1_offset)
-        e_theta2_wrapped = jnp.where(use_direct, e_theta2_direct, e_theta2_offset)
-        
-        # Select final angles: use wrapping only when no preference, direct otherwise
-        no_preference = self.motion_preference == 0
-        e_theta1 = jnp.where(no_preference, e_theta1_wrapped, e_theta1_direct)
-        e_theta2 = jnp.where(no_preference, e_theta2_wrapped, e_theta2_direct)
-        
-        r_hdg = self.heading_reward_weight * (1.0 - (jnp.abs(e_theta1) / self.theta_max) ** 2
-                      + 1.0 - (jnp.abs(e_theta2) / self.theta_max) ** 2)
-        
-        # ---------------------------------------------------------------
-        # 3. terminal reward with fixed 0.5 weighting (no logistic switch)
-        terminal_reward = 0.5 * r_pos + 0.5 * r_hdg
+        # 3. terminal reward, currently only using position reward
+        terminal_reward = r_pos
         return terminal_reward
 
     

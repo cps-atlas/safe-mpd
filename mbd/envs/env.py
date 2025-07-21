@@ -68,7 +68,7 @@ class Env:
     def set_obs_rectangle_parking(self):
         """Set rectangular obstacles for parking scenario"""
         obs_rectangle = [
-            [0.0, 13.0, 30.0, 2.0, 0.0]
+            [0.0, 15.0, 30.0, 2.0, 0.0]
         ]
         return obs_rectangle
     

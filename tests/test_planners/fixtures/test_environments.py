@@ -90,6 +90,9 @@ def create_test_tt2d_environment(config: TestConfig) -> Any:
         trailer_width=config.trailer_width,
         v_max=config.v_max,
         delta_max_deg=config.delta_max_deg,
+        # Acceleration control constraints (for acc_tt2d)
+        a_max=config.a_max,
+        omega_max=config.omega_max,
         d_thr_factor=config.d_thr_factor,
         k_switch=config.k_switch,
         steering_weight=config.steering_weight,

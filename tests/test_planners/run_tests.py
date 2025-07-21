@@ -21,6 +21,8 @@ from fixtures.test_configs import (
     list_available_scenarios,
     list_default_scenarios,
     list_demo_scenarios,
+    list_kinematic_scenarios,
+    list_acceleration_scenarios,
     get_scenario_pairs
 )
 
@@ -31,8 +33,8 @@ def setup_visualization():
     global ENABLE_VISUALIZATION
     if ENABLE_VISUALIZATION:
         print("🎨 Visualization enabled - tests will show animations")
-        from fixtures.test_configs import TEST_SCENARIOS
-        for scenario_name, config in TEST_SCENARIOS.items():
+        from fixtures.test_configs import ALL_TEST_SCENARIOS
+        for scenario_name, config in ALL_TEST_SCENARIOS.items():
             config.visualize = True
             config.render = True
             config.show_animation = True
@@ -109,6 +111,42 @@ def run_demo_tests(visualize: bool = False):
     return result.wasSuccessful()
 
 
+def run_acceleration_tests(visualize: bool = False):
+    """Run all acceleration dynamics tests (default + demo)."""
+    print("Running all acceleration dynamics tests (default + demo)...")
+    
+    acc_scenarios = list_acceleration_scenarios()
+    test_methods = [f"test_{scenario}" for scenario in acc_scenarios]
+    
+    suite = unittest.TestSuite()
+    for method_name in test_methods:
+        if hasattr(TestMBDPlanner, method_name):
+            suite.addTest(TestMBDPlanner(method_name))
+    
+    runner = unittest.TextTestRunner(verbosity=2)
+    result = runner.run(suite)
+    
+    return result.wasSuccessful()
+
+
+def run_kinematic_tests(visualize: bool = False):
+    """Run all kinematic dynamics tests (default + demo)."""
+    print("Running all kinematic dynamics tests (default + demo)...")
+    
+    kinematic_scenarios = list_kinematic_scenarios()
+    test_methods = [f"test_{scenario}" for scenario in kinematic_scenarios]
+    
+    suite = unittest.TestSuite()
+    for method_name in test_methods:
+        if hasattr(TestMBDPlanner, method_name):
+            suite.addTest(TestMBDPlanner(method_name))
+    
+    runner = unittest.TextTestRunner(verbosity=2)
+    result = runner.run(suite)
+    
+    return result.wasSuccessful()
+
+
 def run_scenario_comparison(scenario_base: str, visualize: bool = False):
     """
     Run both default and demo versions of a scenario for comparison.
@@ -158,16 +196,30 @@ def list_tests():
     test_methods = [method for method in dir(TestMBDPlanner) if method.startswith('test_')]
     
     # Categorize tests
-    default_tests = [method for method in test_methods if not method.endswith('_demo') and method.startswith('test_parking')]
-    demo_tests = [method for method in test_methods if method.endswith('_demo')]
-    utility_tests = [method for method in test_methods if not method.startswith('test_parking')]
+    kinematic_tests = [method for method in test_methods if method.startswith('test_parking')]
+    acceleration_tests = [method for method in test_methods if method.startswith('test_acc_parking')]
+    utility_tests = [method for method in test_methods if not (method.startswith('test_parking') or method.startswith('test_acc_parking'))]
     
-    print(f"\nDefault Tests - No Demonstration ({len(default_tests)}):")
-    for test in sorted(default_tests):
+    # Further subcategorize by demo status
+    kinematic_default = [method for method in kinematic_tests if not method.endswith('_demo')]
+    kinematic_demo = [method for method in kinematic_tests if method.endswith('_demo')]
+    acceleration_default = [method for method in acceleration_tests if not method.endswith('_demo')]
+    acceleration_demo = [method for method in acceleration_tests if method.endswith('_demo')]
+    
+    print(f"\nKinematic Tests (tt2d) - No Demonstration ({len(kinematic_default)}):")
+    for test in sorted(kinematic_default):
         print(f"  {test}")
     
-    print(f"\nDemo Tests - With Demonstration ({len(demo_tests)}):")
-    for test in sorted(demo_tests):
+    print(f"\nKinematic Tests (tt2d) - With Demonstration ({len(kinematic_demo)}):")
+    for test in sorted(kinematic_demo):
+        print(f"  {test}")
+    
+    print(f"\nAcceleration Tests (acc_tt2d) - No Demonstration ({len(acceleration_default)}):")
+    for test in sorted(acceleration_default):
+        print(f"  {test}")
+    
+    print(f"\nAcceleration Tests (acc_tt2d) - With Demonstration ({len(acceleration_demo)}):")
+    for test in sorted(acceleration_demo):
         print(f"  {test}")
     
     print(f"\nUtility Tests ({len(utility_tests)}):")
@@ -175,6 +227,9 @@ def list_tests():
         print(f"  {test}")
     
     print(f"\nTotal: {len(test_methods)} tests")
+    print(f"  - Kinematic (tt2d): {len(kinematic_tests)}")
+    print(f"  - Acceleration (acc_tt2d): {len(acceleration_tests)}")
+    print(f"  - Utility: {len(utility_tests)}")
 
 
 def main():
@@ -184,9 +239,13 @@ def main():
     # Main action arguments (mutually exclusive)
     action_group = parser.add_mutually_exclusive_group()
     action_group.add_argument('--all', action='store_true', 
-                             help='Run all tests (default + demo + utility)')
+                             help='Run all tests (kinematic + acceleration + utility)')
     action_group.add_argument('--demo', action='store_true',
                              help='Run only tests with demonstration enabled')
+    action_group.add_argument('--acc', action='store_true',
+                             help='Run only acceleration dynamics tests (acc_tt2d)')
+    action_group.add_argument('--kinematic', action='store_true',
+                             help='Run only kinematic dynamics tests (tt2d)')
     action_group.add_argument('--single', type=str, metavar='TEST_NAME',
                              help='Run a single test method')
     action_group.add_argument('--compare', type=str, metavar='SCENARIO_BASE',
@@ -219,13 +278,17 @@ def main():
             success = run_single_test(args.single, visualize=args.visualize)
         elif args.demo:
             success = run_demo_tests(visualize=args.visualize)
+        elif args.acc:
+            success = run_acceleration_tests(visualize=args.visualize)
+        elif args.kinematic:
+            success = run_kinematic_tests(visualize=args.visualize)
         elif args.compare:
             success = run_scenario_comparison(args.compare, visualize=args.visualize)
         elif args.all:
             success = run_all_tests(visualize=args.visualize)
         else:
-            # Default behavior: run default tests (no demonstration)
-            success = run_default_tests(visualize=args.visualize)
+            # Default behavior: run kinematic tests (for backward compatibility)
+            success = run_kinematic_tests(visualize=args.visualize)
         
         # Print summary
         elapsed = time.time() - start_time

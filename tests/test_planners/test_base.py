@@ -134,9 +134,15 @@ class BaseMBDTest(unittest.TestCase):
         # Basic sanity checks
         self.assertEqual(len(actions), config.Hsample, "Action sequence length mismatch")
         self.assertEqual(len(states), config.Hsample + 1, "State sequence length mismatch")  # +1 for initial state
-        self.assertEqual(actions.shape[1], 2, "Actions should have 2 dimensions (v, delta)")
-        self.assertEqual(states.shape[1], 4, "States should have 4 dimensions (x, y, theta1, theta2)")
-        #print("✓ Array dimensions are correct")
+        self.assertEqual(actions.shape[1], 2, "Actions should have 2 dimensions")
+        
+        # Check state dimensions based on dynamics type
+        if config.env_name == "acc_tt2d":
+            self.assertEqual(states.shape[1], 6, "Acceleration dynamics states should have 6 dimensions (x, y, theta1, theta2, v, delta)")
+            print("✓ 6D acceleration dynamics state dimensions are correct")
+        else:  # tt2d
+            self.assertEqual(states.shape[1], 4, "Kinematic dynamics states should have 4 dimensions (x, y, theta1, theta2)")
+            print("✓ 4D kinematic dynamics state dimensions are correct")
         
     def compute_goal_distance(self, final_state: np.ndarray, config: TestConfig, env) -> float:
         # Get the actual goal position from the environment

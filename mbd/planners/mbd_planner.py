@@ -60,9 +60,9 @@ class MBDConfig:
     temp_sample: float = 0.01  # temperature for sampling
     beta0: float = 1e-5  # initial beta
     betaT: float = 1e-2  # final beta
-    enable_demo: bool = True
+    enable_demo: bool = False
     # movement preference
-    motion_preference: int = 1  # 0=none, 1=forward, -1=backward
+    motion_preference: int = 0  # 0=none, 1=forward, -1=backward
     # collision handling
     collision_penalty: float = 0.15  # penalty applied for obstacle collisions
     enable_collision_projection: bool = True  # whether to project state back on obstacle collision
@@ -83,8 +83,8 @@ class MBDConfig:
     # reward thresholds
     reward_threshold: float = 25.0  # position error threshold for main reward function
     ref_reward_threshold: float = 10.0  # position error threshold for demonstration evaluation
-    max_w_theta: float = 0.75  # maximum weight for heading reward vs position reward
-    hitch_angle_weight: float = 0.2  # weight for hitch angle (articulation) reward
+    max_w_theta: float = 0.5  # maximum weight for heading reward vs position reward
+    hitch_angle_weight: float = 0.05  # weight for hitch angle (articulation) reward
     # terminal reward
     terminal_reward_threshold: float = 1.0  # position error threshold for terminal reward
     terminal_reward_weight: float = 1.0  # weight for terminal reward at final state
@@ -673,7 +673,7 @@ if __name__ == "__main__":
     # Set initial position using geometric parameters relative to parking lot
     # dx: distance from tractor front face to target parking space center
     # dy: distance from tractor to parking lot entrance line
-    env.set_init_pos(dx=-3.0, dy=4.0, theta1=0, theta2=0)
+    env.set_init_pos(dx=9.0, dy=2.0, theta1=0, theta2=0)
     if config.motion_preference == -2:
         env.set_init_pos(dx=-12.0, dy=1.0, theta1=jnp.pi, theta2=jnp.pi)
     # Set goal angles based on motion preference
