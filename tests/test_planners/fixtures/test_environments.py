@@ -8,6 +8,7 @@ for MBD planner testing, specifically focused on parking scenarios.
 
 import os
 import sys
+import logging
 from typing import Dict, Any, Optional
 
 # Add the MBD source path so we can import the modules
@@ -43,13 +44,13 @@ def setup_parking_environment(config: TestConfig) -> Env:
         # Filter out the default dummy obstacle (0,0,0) if it exists
         existing_circles = [obs for obs in existing_circles if obs[2] > 0]
         env.obs_circle = existing_circles + config.custom_circular_obstacles
-        print(f"Added {len(config.custom_circular_obstacles)} custom circular obstacles")
+        logging.debug(f"Added {len(config.custom_circular_obstacles)} custom circular obstacles")
         
     # Add custom rectangular obstacles if specified  
     if config.custom_rectangular_obstacles:
         existing_rects = env.obs_rectangle if len(env.obs_rectangle) > 0 else []
         env.obs_rectangle = existing_rects + config.custom_rectangular_obstacles
-        print(f"Added {len(config.custom_rectangular_obstacles)} custom rectangular obstacles")
+        logging.debug(f"Added {len(config.custom_rectangular_obstacles)} custom rectangular obstacles")
         
     return env
 
@@ -124,26 +125,26 @@ def create_test_tt2d_environment(config: TestConfig) -> Any:
             theta1=config.init_theta1, 
             theta2=config.init_theta2
         )
-        print(f"Set initial position: dx={config.init_dx}, dy={config.init_dy}, "
+        logging.debug(f"Set initial position: dx={config.init_dx}, dy={config.init_dy}, "
               f"theta1={config.init_theta1:.3f}, theta2={config.init_theta2:.3f}")
     
     # Set goal position (only orientations, position determined by target parking space)
     if config.goal_theta1 is not None and config.goal_theta2 is not None:
         env.set_goal_pos(theta1=config.goal_theta1, theta2=config.goal_theta2)
-        print(f"Set goal orientation: theta1={config.goal_theta1:.3f}, theta2={config.goal_theta2:.3f}")
+        logging.debug(f"Set goal orientation: theta1={config.goal_theta1:.3f}, theta2={config.goal_theta2:.3f}")
     
     # Clear any existing demonstration trajectory to ensure fresh generation
     env.xref = None
     env.rew_xref = None
     if hasattr(env, 'angle_mask'):
         env.angle_mask = None
-    print(f"Cleared demonstration trajectory for test: {config.test_name}")
+    logging.debug(f"Cleared demonstration trajectory for test: {config.test_name}")
     
     # Clear JIT function cache to ensure fresh compilation with new trajectory
     clear_jit_cache()
-    print(f"Cleared JIT function cache for test: {config.test_name}")
+    logging.debug(f"Cleared JIT function cache for test: {config.test_name}")
     
-    print(f"Final positions - x0: {env.x0}, xg: {env.xg}")
+    logging.debug(f"Final positions - x0: {env.x0}, xg: {env.xg}")
     
     return env
 

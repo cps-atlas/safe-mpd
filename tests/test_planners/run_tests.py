@@ -11,6 +11,7 @@ import sys
 import unittest
 import argparse
 import time
+import logging
 from typing import List, Optional
 
 # Add the parent directory to the path to import test modules
@@ -32,7 +33,7 @@ def setup_visualization():
     """Setup visualization by monkey-patching test configs"""
     global ENABLE_VISUALIZATION
     if ENABLE_VISUALIZATION:
-        print("🎨 Visualization enabled - tests will show animations")
+        logging.info("🎨 Visualization enabled - tests will show animations")
         from fixtures.test_configs import ALL_TEST_SCENARIOS
         for scenario_name, config in ALL_TEST_SCENARIOS.items():
             config.visualize = True
@@ -50,7 +51,7 @@ def run_single_test(test_name: str, visualize: bool = False, enable_demo: Option
         visualize: Enable visualization for the test
         enable_demo: Override demo setting (None uses test default)
     """
-    print(f"Running single test: {test_name}")
+    logging.info(f"Running single test: {test_name}")
     
     # Create test suite with single test
     suite = unittest.TestSuite()
@@ -58,7 +59,7 @@ def run_single_test(test_name: str, visualize: bool = False, enable_demo: Option
 
     # Patch the test instance to force visualization if requested (for both demo and non-demo)
     if visualize:
-        print("Visualization enabled for this test (single mode)")
+        logging.debug("Visualization enabled for this test (single mode)")
         orig_run_scenario_test = test_instance.run_scenario_test
         def run_scenario_test_with_visualize(*args, **kwargs):
             # Always force visualize=True, even if already present
@@ -77,7 +78,7 @@ def run_single_test(test_name: str, visualize: bool = False, enable_demo: Option
 
 def run_default_tests(visualize: bool = False):
     """Run all default tests (no demonstration)."""
-    print("Running all default tests (no demonstration)...")
+    logging.info("Running all default tests (no demonstration)...")
     
     # Only include non-demo scenarios
     default_scenarios = [name for name in list_default_scenarios() if not name.endswith("_demo")]
@@ -96,7 +97,7 @@ def run_default_tests(visualize: bool = False):
 
 def run_demo_tests(visualize: bool = False):
     """Run all tests with demonstration enabled."""
-    print("Running all demo tests (with demonstration)...")
+    logging.info("Running all demo tests (with demonstration)...")
     
     demo_scenarios = list_demo_scenarios()
     test_methods = [f"test_{scenario}" for scenario in demo_scenarios]
@@ -114,7 +115,7 @@ def run_demo_tests(visualize: bool = False):
 
 def run_acceleration_tests(visualize: bool = False):
     """Run acceleration dynamics tests (no demonstration unless --demo specified)."""
-    print("Running acceleration dynamics tests (no demonstration)...")
+    logging.info("Running acceleration dynamics tests (no demonstration)...")
     
     # Only include non-demo acceleration scenarios
     acc_scenarios = [name for name in list_acceleration_scenarios() if not name.endswith("_demo")]
@@ -133,7 +134,7 @@ def run_acceleration_tests(visualize: bool = False):
 
 def run_kinematic_tests(visualize: bool = False):
     """Run kinematic dynamics tests (no demonstration unless --demo specified)."""
-    print("Running kinematic dynamics tests (no demonstration)...")
+    logging.info("Running kinematic dynamics tests (no demonstration)...")
     
     # Only include non-demo kinematic scenarios
     kinematic_scenarios = [name for name in list_kinematic_scenarios() if not name.endswith("_demo")]
@@ -158,7 +159,7 @@ def run_scenario_comparison(scenario_base: str, visualize: bool = False):
         scenario_base: Base scenario name (without _demo suffix)
         visualize: Enable visualization
     """
-    print(f"Running scenario comparison for: {scenario_base}")
+    logging.info(f"Running scenario comparison for: {scenario_base}")
     
     default_test = f"test_{scenario_base}"
     demo_test = f"test_{scenario_base}_demo"
@@ -179,7 +180,7 @@ def run_scenario_comparison(scenario_base: str, visualize: bool = False):
 
 def run_all_tests(visualize: bool = False):
     """Run all available tests."""
-    print("Running all tests (default + demo + utility)...")
+    logging.info("Running all tests (default + demo + utility)...")
     
     # Load all tests from TestMBDPlanner
     loader = unittest.TestLoader()
@@ -193,7 +194,7 @@ def run_all_tests(visualize: bool = False):
 
 def list_tests():
     """List all available tests."""
-    print("Available test methods:")
+    logging.info("Available test methods:")
     
     # Get all test methods from TestMBDPlanner
     test_methods = [method for method in dir(TestMBDPlanner) if method.startswith('test_')]
@@ -209,30 +210,30 @@ def list_tests():
     acceleration_default = [method for method in acceleration_tests if not method.endswith('_demo')]
     acceleration_demo = [method for method in acceleration_tests if method.endswith('_demo')]
     
-    print(f"\nKinematic Tests (tt2d) - No Demonstration ({len(kinematic_default)}):")
+    logging.info(f"\nKinematic Tests (tt2d) - No Demonstration ({len(kinematic_default)}):")
     for test in sorted(kinematic_default):
-        print(f"  {test}")
+        logging.info(f"  {test}")
     
-    print(f"\nKinematic Tests (tt2d) - With Demonstration ({len(kinematic_demo)}):")
+    logging.info(f"\nKinematic Tests (tt2d) - With Demonstration ({len(kinematic_demo)}):")
     for test in sorted(kinematic_demo):
-        print(f"  {test}")
+        logging.info(f"  {test}")
     
-    print(f"\nAcceleration Tests (acc_tt2d) - No Demonstration ({len(acceleration_default)}):")
+    logging.info(f"\nAcceleration Tests (acc_tt2d) - No Demonstration ({len(acceleration_default)}):")
     for test in sorted(acceleration_default):
-        print(f"  {test}")
+        logging.info(f"  {test}")
     
-    print(f"\nAcceleration Tests (acc_tt2d) - With Demonstration ({len(acceleration_demo)}):")
+    logging.info(f"\nAcceleration Tests (acc_tt2d) - With Demonstration ({len(acceleration_demo)}):")
     for test in sorted(acceleration_demo):
-        print(f"  {test}")
+        logging.info(f"  {test}")
     
-    print(f"\nUtility Tests ({len(utility_tests)}):")
+    logging.info(f"\nUtility Tests ({len(utility_tests)}):")
     for test in sorted(utility_tests):
-        print(f"  {test}")
+        logging.info(f"  {test}")
     
-    print(f"\nTotal: {len(test_methods)} tests")
-    print(f"  - Kinematic (tt2d): {len(kinematic_tests)}")
-    print(f"  - Acceleration (acc_tt2d): {len(acceleration_tests)}")
-    print(f"  - Utility: {len(utility_tests)}")
+    logging.info(f"\nTotal: {len(test_methods)} tests")
+    logging.info(f"  - Kinematic (tt2d): {len(kinematic_tests)}")
+    logging.info(f"  - Acceleration (acc_tt2d): {len(acceleration_tests)}")
+    logging.info(f"  - Utility: {len(utility_tests)}")
 
 
 def main():
@@ -295,18 +296,18 @@ def main():
         
         # Print summary
         elapsed = time.time() - start_time
-        print(f"\n{'='*50}")
-        print(f"Test run completed in {elapsed:.2f} seconds")
-        print(f"Status: {'PASSED' if success else 'FAILED'}")
-        print(f"{'='*50}")
+        logging.info(f"\n{'='*50}")
+        logging.info(f"Test run completed in {elapsed:.2f} seconds")
+        logging.info(f"Status: {'PASSED' if success else 'FAILED'}")
+        logging.info(f"{'='*50}")
         
         sys.exit(0 if success else 1)
         
     except KeyboardInterrupt:
-        print("\nTest run interrupted by user")
+        logging.info("\nTest run interrupted by user")
         sys.exit(1)
     except Exception as e:
-        print(f"Error during test run: {e}")
+        logging.info(f"Error during test run: {e}")
         sys.exit(1)
 
 

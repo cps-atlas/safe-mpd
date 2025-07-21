@@ -4,6 +4,7 @@ from flax import struct
 from functools import partial
 import matplotlib.pyplot as plt
 import numpy as np
+import logging
 from matplotlib.transforms import Affine2D
 
 import mbd
@@ -195,7 +196,7 @@ class TractorTrailer2d:
         elif x is not None and y is not None:
             # Direct coordinate specification
             self.x0 = jnp.array([x, y, theta1, theta2])
-            print(f"overwrite x0: {self.x0}")
+            logging.debug(f"overwrite x0: {self.x0}")
         else:
             # Default case1 values
             x = x if x is not None else -3.0
@@ -225,7 +226,7 @@ class TractorTrailer2d:
             new_theta2 = theta2 if theta2 is not None else np.pi
             
         self.xg = jnp.array([new_x, new_y, new_theta1, new_theta2])
-        print(f"overwrite xg: {self.xg}")
+        logging.debug(f"overwrite xg: {self.xg}")
         
     def set_rectangle_obs(self, rectangles, coordinate_mode="left-top", padding=0.0):
         """Set rectangular obstacles"""
@@ -378,12 +379,12 @@ class TractorTrailer2d:
         """
         import numpy as np
         
-        print(f"Generating NEW demonstration trajectory with motion_preference={motion_preference}")
+        logging.debug(f"Generating NEW demonstration trajectory with motion_preference={motion_preference}")
         
         # Extract start and goal positions
         x0_pos = self.x0[:2]
         xg_pos = self.xg[:2]
-        print(f"Demo trajectory: x0_pos={x0_pos}, xg_pos={xg_pos}")
+        logging.debug(f"Demo trajectory: x0_pos={x0_pos}, xg_pos={xg_pos}")
         
         # List to store waypoints
         waypoints = [x0_pos]
@@ -543,11 +544,11 @@ class TractorTrailer2d:
         
         # Find which segment is the final one (last waypoint to goal)
         final_segment_idx = len(waypoints) - 2 if len(waypoints) > 1 else 0
-        print(f"Final segment index: {final_segment_idx} out of {len(waypoints)-1} segments")
+        logging.debug(f"Final segment index: {final_segment_idx} out of {len(waypoints)-1} segments")
         
         # Create angle constraint mask: True only for points in the final segment
         angle_mask = segment_indices == final_segment_idx
-        print(f"Angle constraints will be applied to {np.sum(angle_mask)} out of {len(angle_mask)} points")
+        logging.debug(f"Angle constraints will be applied to {np.sum(angle_mask)} out of {len(angle_mask)} points")
         
         for i in range(num_points-1):
             dx = points_2d[i+1, 0] - points_2d[i, 0]
@@ -580,7 +581,7 @@ class TractorTrailer2d:
         self.xref = jnp.array(xref)
         self.angle_mask = jnp.array(angle_mask)  # Store the angle constraint mask
         
-        print(f"Demo trajectory UPDATED: start=({self.xref[0,0]:.2f},{self.xref[0,1]:.2f}), end=({self.xref[-1,0]:.2f},{self.xref[-1,1]:.2f}), motion_pref={motion_preference}")
+        logging.debug(f"Demo trajectory UPDATED: start=({self.xref[0,0]:.2f},{self.xref[0,1]:.2f}), end=({self.xref[-1,0]:.2f},{self.xref[-1,1]:.2f}), motion_pref={motion_preference}")
         
         return self.xref
     
@@ -600,9 +601,9 @@ class TractorTrailer2d:
             # Add separate terminal reward
             terminal_reward = self.get_terminal_reward(self.xref[-1])
             self.rew_xref = stage_reward_mean + self.terminal_reward_weight * terminal_reward
-            #print(f"Reference trajectory reward compiled: {self.rew_xref:.3f}")
+            #logging.debug(f"Reference trajectory reward compiled: {self.rew_xref:.3f}")
         else:
-            print("Warning: No reference trajectory set. Call generate_demonstration_trajectory first.")
+            logging.warning("Warning: No reference trajectory set. Call generate_demonstration_trajectory first.")
 
     @partial(jax.jit, static_argnums=(0,))
     def get_reward(self, q):

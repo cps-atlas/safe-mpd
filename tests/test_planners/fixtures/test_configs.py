@@ -11,6 +11,7 @@ import numpy as np
 import jax.numpy as jnp  # Use JAX arrays for proper dtype compatibility
 import os
 import sys
+import logging
 from dataclasses import dataclass
 from typing import Optional, List, Tuple, Dict, Any
 
@@ -30,6 +31,7 @@ class TestConfig(MBDConfig):
     save_animation: bool = False
     show_animation: bool = False
     save_denoising_animation: bool = False
+    verbose: bool = False
     
     # Test metadata (additional fields not in MBDConfig)
     test_name: str = ""
@@ -62,6 +64,11 @@ class TestConfig(MBDConfig):
         if self.visualize:
             self.render = True
             self.show_animation = True
+        if self.verbose:
+            logging.basicConfig(level=logging.DEBUG)
+        else:
+            logging.basicConfig(level=logging.INFO)
+
 
 
 # Predefined test scenarios for kinematic dynamics (tt2d)

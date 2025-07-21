@@ -7,8 +7,8 @@ import numpy as np
 from .tt2d import TractorTrailer2d, State, rk4
 
 """
-Created on January 8th, 2025
-@author: Assistant
+Created on July 21st, 2025
+@author: Taekyung Kim
 
 @description: 
 Implement acceleration-controlled tractor-trailer dynamics.

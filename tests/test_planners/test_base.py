@@ -6,10 +6,6 @@ This module provides the base test class that all MBD planner tests inherit from
 It includes common utilities, validation methods, and test infrastructure.
 """
 
-# TODO: add without demonstratino test cases
-# TODO: add obstacle on top (in some cases)
-# TODO: modify test cases similar to the presentaiotn slides
-
 import os
 import sys
 import time
@@ -50,17 +46,19 @@ class BaseMBDTest(unittest.TestCase):
         
         cls.test_results_dir = "tests/test_planners/results"
         os.makedirs(cls.test_results_dir, exist_ok=True)
-        print(f"Test results will be saved to: {cls.test_results_dir}")
+        logging.debug(f"Test results will be saved to: {cls.test_results_dir}")
         
     def setUp(self):
         """Set up before each test"""
         self.start_time = time.time()
-        print(f"\n=== Starting test: {self._testMethodName} ===")
+        logging.info(f"\n=== Starting test: {self._testMethodName} ===")
         
     def tearDown(self):
         """Clean up after each test"""
         elapsed = time.time() - self.start_time
-        print(f"=== Test {self._testMethodName} completed in {elapsed:.2f}s ===")
+        logging.debug(f"=== Test {self._testMethodName} completed in {elapsed:.2f}s ===")
+        print()
+        
         
 
         
@@ -74,11 +72,11 @@ class BaseMBDTest(unittest.TestCase):
         Returns:
             Tuple of (reward, actions, states, timing_info)
         """
-        print(f"Running test: {config.test_name}")
-        print(f"Description: {config.description}")
-        print(f"Motion preference: {config.motion_preference}")
-        print(f"Enable demo: {config.enable_demo}")
-        print(f"Samples: {config.Nsample}, Horizon: {config.Hsample}, Diffusion steps: {config.Ndiffuse}")
+        logging.debug(f"Running test: {config.test_name}")
+        logging.debug(f"Description: {config.description}")
+        logging.debug(f"Motion preference: {config.motion_preference}")
+        logging.debug(f"Enable demo: {config.enable_demo}")
+        logging.debug(f"Samples: {config.Nsample}, Horizon: {config.Hsample}, Diffusion steps: {config.Ndiffuse}")
         
         # Create test environment
         env = create_test_tt2d_environment(config)
@@ -122,7 +120,7 @@ class BaseMBDTest(unittest.TestCase):
                                f"Reward {reward:.3f} below minimum {config.expected_reward_min}")
         self.assertLessEqual(reward, config.expected_reward_max,
                             f"Reward {reward:.3f} above maximum {config.expected_reward_max}")
-        print(f"✓ Reward {reward:.3f} within expected range [{config.expected_reward_min}, {config.expected_reward_max}]")
+        logging.info(f"✓ Reward {reward:.3f} within expected range [{config.expected_reward_min}, {config.expected_reward_max}]")
         
         # Check constraint violations along trajectory
         hitch_violation_found, collision_found = self.check_trajectory_violations(states, env)
@@ -131,8 +129,8 @@ class BaseMBDTest(unittest.TestCase):
         final_state = states[-1]
         position_success, tractor_distance, trailer_distance = self.check_position_success(final_state, config, env)
         
-        print(f"✓ Constraint violations - Hitch: {hitch_violation_found}, Collision: {collision_found}")
-        print(f"✓ Position success: {position_success} (tractor: {tractor_distance:.2f}m, trailer: {trailer_distance:.2f}m, limit: {config.min_final_distance_to_goal}m)")
+        logging.info(f"✓ Constraint violations - Hitch: {hitch_violation_found}, Collision: {collision_found}")
+        logging.info(f"✓ Position success: {position_success} (tractor: {tractor_distance:.2f}m, trailer: {trailer_distance:.2f}m, limit: {config.min_final_distance_to_goal}m)")
         
         # Success is defined as reaching goal position without this being a hard failure
         # We log violations but don't fail the test for now (for analysis purposes)
@@ -262,8 +260,8 @@ class BaseMBDTest(unittest.TestCase):
         arrays_file = os.path.join(self.test_results_dir, f"{config.test_name}_arrays.npz")
         np.savez(arrays_file, actions=actions, states=states)
         
-        print(f"Results saved to: {result_file}")
-        print(f"Arrays saved to: {arrays_file}")
+        logging.debug(f"Results saved to: {result_file}")
+        logging.debug(f"Arrays saved to: {arrays_file}")
         
     def get_git_commit(self) -> str:
         """Get current git commit hash for reproducibility."""
