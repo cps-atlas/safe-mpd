@@ -51,7 +51,7 @@ class MBDConfig:
     # exp
     seed: int = 0
     # env
-    env_name: str = "tt2d"
+    env_name: str = "tt2d"  # "tt2d" for kinematic, "acc_tt2d" for acceleration
     case: str = "parking" # "parking" for parking scenario, "navigation" for navigation scenario
     # diffusion
     Nsample: int = 20000  # number of samples
@@ -62,7 +62,7 @@ class MBDConfig:
     betaT: float = 1e-2  # final beta
     enable_demo: bool = True
     # movement preference
-    motion_preference: int = -1  # 0=none, 1=forward, -1=backward
+    motion_preference: int = 1  # 0=none, 1=forward, -1=backward
     # collision handling
     collision_penalty: float = 0.15  # penalty applied for obstacle collisions
     enable_collision_projection: bool = True  # whether to project state back on obstacle collision
@@ -77,6 +77,9 @@ class MBDConfig:
     # input constraints
     v_max: float = 3.0  # velocity limit
     delta_max_deg: float = 55.0  # steering angle limit in degrees
+    # acceleration control constraints (for acc_tt2d)
+    a_max: float = 2.0  # acceleration limit [m/s²]
+    omega_max: float = 1.0  # steering rate limit [rad/s]
     # reward thresholds
     reward_threshold: float = 25.0  # position error threshold for main reward function
     ref_reward_threshold: float = 10.0  # position error threshold for demonstration evaluation
@@ -146,6 +149,9 @@ def dict_to_config_obj(config_dict):
         # input constraints
         v_max=float(config_dict.get("v_max", 3.0)),
         delta_max_deg=float(config_dict.get("delta_max_deg", 55.0)),
+        # acceleration control constraints
+        a_max=float(config_dict.get("a_max", 2.0)),
+        omega_max=float(config_dict.get("omega_max", 1.0)),
         # reward shaping parameters
         d_thr_factor=float(config_dict.get("d_thr_factor", 1.0)),
         k_switch=float(config_dict.get("k_switch", 2.5)),
@@ -648,6 +654,9 @@ if __name__ == "__main__":
         # input constraints
         v_max=config.v_max,
         delta_max_deg=config.delta_max_deg,
+        # acceleration control constraints
+        a_max=config.a_max,
+        omega_max=config.omega_max,
         # reward shaping parameters
         d_thr_factor=config.d_thr_factor,
         k_switch=config.k_switch,

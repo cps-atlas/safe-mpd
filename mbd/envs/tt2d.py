@@ -272,20 +272,17 @@ class TractorTrailer2d:
         u_scaled = self.input_scaler(action)
         
         q = state.pipeline_state
-        q_new = rk4(self.tractor_trailer_dynamics, state.pipeline_state, u_scaled, self.dt)
         
-        # Check obstacle collision and hitch angle violation separately
-        obstacle_collision = self.check_obstacle_collision(q_new, self.obs_circles, self.obs_rectangles)
-        hitch_violation = self.check_hitch_violation(q_new)
+        # Use gated rollout for kinematic dynamics
+        q_new, obstacle_collision, hitch_violation = self.gated_rollout(q, u_scaled)
         
-        # Apply different projections based on type of violation
-        # Obstacle collision: use collision projection setting
-        # Hitch violation: use hitch projection setting
-        q_after_collision_proj = jnp.where(self.enable_collision_projection & obstacle_collision, q, q_new)
-        q = jnp.where(self.enable_hitch_projection & hitch_violation, q, q_after_collision_proj)
+        # Note: gated_rollout already handles collision/hitch checking and projection
+        q = q_new
         
         # Compute reward: normal reward if no collision/violation, penalty if collision/hitch violation
         reward = self.get_reward(q)
+        
+        # Apply penalties using flags returned from gated_rollout (no recomputation needed)
         reward = jnp.where(obstacle_collision, reward - self.collision_penalty, reward)
         reward = jnp.where(hitch_violation, reward - self.hitch_penalty, reward)
         
@@ -298,17 +295,52 @@ class TractorTrailer2d:
         return state.replace(pipeline_state=q, obs=q, reward=reward, done=0.0)
 
     @partial(jax.jit, static_argnums=(0,))
-    def get_preference_penalty(self, u):
+    def gated_rollout(self, q, u):
+        """
+        Gated rollout for kinematic dynamics.
+        This extracts the existing safety logic into a reusable function.
+        Returns both final state and collision/violation flags to avoid recomputation.
+        """
+        # Forward propagate one step
+        q_proposed = rk4(self.tractor_trailer_dynamics, q, u, self.dt)
+        
+        # Check obstacle collision and hitch angle violation separately
+        obstacle_collision = self.check_obstacle_collision(q_proposed, self.obs_circles, self.obs_rectangles)
+        hitch_violation = self.check_hitch_violation(q_proposed)
+        
+        # Apply different projections based on type of violation
+        # Obstacle collision: use collision projection setting
+        # Hitch violation: use hitch projection setting
+        q_gated = jnp.where(self.enable_collision_projection & obstacle_collision, q, q_proposed)
+        q_final = jnp.where(self.enable_hitch_projection & hitch_violation, q, q_gated)
+        
+        return q_final, obstacle_collision, hitch_violation
+
+    @partial(jax.jit, static_argnums=(0,))
+    def get_preference_penalty(self, x_or_u, u=None):
         """
         Calculate preference penalty based on movement direction.
         
         Args:
-            u: scaled input [v, delta] where v is velocity
+            x_or_u: For kinematic model, this is u (scaled input [v, delta]).
+                   For acceleration model, this is x (state) and u is provided separately.
+            u: Optional scaled control input, used when x_or_u is state x.
             
         Returns:
             penalty: small penalty for non-preferred movement direction
         """
-        v, delta = u
+        # Determine if this is kinematic (u only) or acceleration dynamics (x and u)
+        if u is None:
+            # Kinematic model: x_or_u is actually u (scaled input)
+            v, delta = x_or_u
+        else:
+            # Acceleration model: x_or_u is state x, extract velocity from state
+            # For kinematic model fallback, extract from control input
+            if len(x_or_u) >= 5:  # 6D state (acceleration model)
+                v = x_or_u[4]  # Extract velocity from state
+            else:  # 4D state, use control input
+                v, delta = u
+        
         penalty_weight = self.preference_penalty_weight  # Configurable penalty weight for stronger preference enforcement
         
         # Forward preference penalty (penalize backward movement)
@@ -326,7 +358,6 @@ class TractorTrailer2d:
         is_forward_enforce = self.motion_preference == 2
         is_backward_enforce = self.motion_preference == -2
         
-        # Use nested jnp.where to handle all cases
         # For strict enforcement (2, -2), no penalty is needed since motion is already constrained
         penalty = jnp.where(is_forward_pref, forward_penalty,
                            jnp.where(is_backward_pref, backward_penalty,
