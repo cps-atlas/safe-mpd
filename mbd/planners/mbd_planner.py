@@ -20,9 +20,8 @@ from mbd.utils import (
 # config.update("jax_enable_x64", True)
 
 # Enable JAX compilation logging
-logging.basicConfig(level=logging.INFO)
 jax.config.update('jax_log_compiles', False)
-
+    
 # Global compilation counter for debugging
 compilation_count = 0
 
@@ -31,7 +30,7 @@ def count_compilation(f):
     def wrapped(*args, **kwargs):
         global compilation_count
         compilation_count += 1
-        print(f"    [COMPILATION #{compilation_count}] Compiling {f.__name__}")
+        logging.debug(f"    [COMPILATION #{compilation_count}] Compiling {f.__name__}")
         return f(*args, **kwargs)
     return wrapped
 
@@ -43,7 +42,7 @@ def clear_jit_cache():
     """Clear the JIT function cache - useful for tests with different configurations"""
     global _jit_function_cache
     _jit_function_cache.clear()
-    print("JIT function cache cleared")
+    logging.debug("JIT function cache cleared")
 
 
 @dataclass
@@ -51,8 +50,9 @@ class MBDConfig:
     # exp
     seed: int = 0
     # env
-    env_name: str = "tt2d"
+    env_name: str = "acc_tt2d"  # "tt2d" for kinematic, "acc_tt2d" for acceleration
     case: str = "parking" # "parking" for parking scenario, "navigation" for navigation scenario
+    verbose: bool = False
     # diffusion
     Nsample: int = 20000  # number of samples
     Hsample: int = 50  # horizon
@@ -60,14 +60,14 @@ class MBDConfig:
     temp_sample: float = 0.01  # temperature for sampling
     beta0: float = 1e-5  # initial beta
     betaT: float = 1e-2  # final beta
-    enable_demo: bool = True
+    enable_demo: bool = False
     # movement preference
-    motion_preference: int = -1  # 0=none, 1=forward, -1=backward
+    motion_preference: int = 0  # 0=none, 1=forward, -1=backward
     # collision handling
     collision_penalty: float = 0.15  # penalty applied for obstacle collisions
-    enable_collision_projection: bool = True  # whether to project state back on obstacle collision
+    enable_gated_rollout_collision: bool = True  # whether to use gated rollout for obstacle collision
     hitch_penalty: float = 0.10  # penalty applied for hitch angle violations
-    enable_hitch_projection: bool = True  # whether to project state back on hitch violation
+    enable_gated_rollout_hitch: bool = True  # whether to use gated rollout for hitch violation
     # physical parameters
     l1: float = 3.23  # tractor wheelbase
     l2: float = 2.9   # trailer length
@@ -77,11 +77,14 @@ class MBDConfig:
     # input constraints
     v_max: float = 3.0  # velocity limit
     delta_max_deg: float = 55.0  # steering angle limit in degrees
+    # acceleration control constraints (for acc_tt2d)
+    a_max: float = 2.0  # acceleration limit [m/s²]
+    omega_max: float = 1.0  # steering rate limit [rad/s]
     # reward thresholds
     reward_threshold: float = 25.0  # position error threshold for main reward function
     ref_reward_threshold: float = 10.0  # position error threshold for demonstration evaluation
-    max_w_theta: float = 0.75  # maximum weight for heading reward vs position reward
-    hitch_angle_weight: float = 0.2  # weight for hitch angle (articulation) reward
+    max_w_theta: float = 0.5  # maximum weight for heading reward vs position reward
+    hitch_angle_weight: float = 0.05  # weight for hitch angle (articulation) reward
     # terminal reward
     terminal_reward_threshold: float = 1.0  # position error threshold for terminal reward
     terminal_reward_weight: float = 1.0  # weight for terminal reward at final state
@@ -92,9 +95,9 @@ class MBDConfig:
     preference_penalty_weight: float = 0.5  # penalty weight for movement preference
     heading_reward_weight: float = 0.5  # (should be 0.5 always) weight for heading reward calculation
     # demonstration evaluation weights
-    ref_pos_weight: float = 0.3  # position weight in demo evaluation
-    ref_theta1_weight: float = 0.35  # theta1 weight in demo evaluation  
-    ref_theta2_weight: float = 0.35 # theta2 weight in demo evaluation
+    ref_pos_weight: float = 0.8  # position weight in demo evaluation
+    ref_theta1_weight: float = 0.1  # theta1 weight in demo evaluation  
+    ref_theta2_weight: float = 0.1 # theta2 weight in demo evaluation
     # animation
     render: bool = True
     save_animation: bool = False # flag to enable animation saving
@@ -130,9 +133,9 @@ def dict_to_config_obj(config_dict):
         enable_demo=bool(config_dict["enable_demo"]),
         motion_preference=int(config_dict.get("motion_preference", 0)),
         collision_penalty=float(config_dict.get("collision_penalty", 0.15)),
-        enable_collision_projection=bool(config_dict.get("enable_collision_projection", True)),
+        enable_gated_rollout_collision=bool(config_dict.get("enable_gated_rollout_collision", True)),
         hitch_penalty=float(config_dict.get("hitch_penalty", 0.10)),
-        enable_hitch_projection=bool(config_dict.get("enable_hitch_projection", True)),
+        enable_gated_rollout_hitch=bool(config_dict.get("enable_gated_rollout_hitch", True)),
         reward_threshold=float(config_dict.get("reward_threshold", 25.0)),
         ref_reward_threshold=float(config_dict.get("ref_reward_threshold", 5.0)),
         max_w_theta=float(config_dict.get("max_w_theta", 0.75)),
@@ -146,6 +149,9 @@ def dict_to_config_obj(config_dict):
         # input constraints
         v_max=float(config_dict.get("v_max", 3.0)),
         delta_max_deg=float(config_dict.get("delta_max_deg", 55.0)),
+        # acceleration control constraints
+        a_max=float(config_dict.get("a_max", 2.0)),
+        omega_max=float(config_dict.get("omega_max", 1.0)),
         # reward shaping parameters
         d_thr_factor=float(config_dict.get("d_thr_factor", 1.0)),
         k_switch=float(config_dict.get("k_switch", 2.5)),
@@ -184,7 +190,7 @@ def run_diffusion(args=None, env=None):
     elif args is None:
         raise ValueError("args parameter is required and cannot be None")
     
-    print("=== DIFFUSION TIMING ANALYSIS ===")
+    logging.debug("=== DIFFUSION TIMING ANALYSIS ===")
     total_start_time = time.time()
     
     rng = jax.random.PRNGKey(seed=args.seed)
@@ -201,7 +207,7 @@ def run_diffusion(args=None, env=None):
         reward_compile_start = time.time()
         env.compute_demonstration_reward()
         reward_compile_time = time.time() - reward_compile_start
-        print(f"Demo trajectory generated with reward: {env.rew_xref:.3f}")
+        logging.info(f"Demo trajectory generated with reward: {env.rew_xref:.3f}")
     demo_time = time.time() - demo_start_time
     
     # Setup JIT compiled functions (with simple caching to avoid recompilation)
@@ -211,10 +217,10 @@ def run_diffusion(args=None, env=None):
     cache_key = f"{type(env).__name__}_env_funcs"
     
     if cache_key in _jit_function_cache:
-        print(f"Using cached environment JIT functions")
+        logging.debug(f"Using cached environment JIT functions")
         step_env_jit, reset_env_jit, rollout_us_jit, rollout_us_with_terminal_jit = _jit_function_cache[cache_key]
     else:
-        print(f"Creating new environment JIT functions")
+        logging.info(f"Creating new environment JIT functions")
         step_env_jit = jax.jit(env.step)
         reset_env_jit = jax.jit(env.reset)
         rollout_us_jit = jax.jit(partial(rollout_us, step_env_jit))
@@ -236,15 +242,15 @@ def run_diffusion(args=None, env=None):
     YN = jnp.zeros([args.Hsample, Nu])
     
     if need_warmup:
-        print("Warming up JIT compiled functions...")
+        logging.debug("Warming up JIT compiled functions...")
         #print(f"Environment shapes: Nx={Nx}, Nu={Nu}")
-        print(f"Diffusion shapes: Nsample={args.Nsample}, Hsample={args.Hsample}, Ndiffuse={args.Ndiffuse}")
+        logging.debug(f"Diffusion shapes: Nsample={args.Nsample}, Hsample={args.Hsample}, Ndiffuse={args.Ndiffuse}")
         warmup_start_time = time.time()
         
         # Warm up step_env_jit and reset_env_jit (already done above, but let's be explicit)
-        print("  Warming up reset_env_jit...")
+        logging.debug("  Warming up reset_env_jit...")
         _ = reset_env_jit(rng_reset)
-        print("  Warming up step_env_jit...")
+        logging.debug("  Warming up step_env_jit...")
         # Use the SAME action shape AND creation pattern that will be used in post-processing
         # Create a dummy Y0 array and extract actions the same way as in post-processing
         dummy_Y0_warmup = jnp.zeros([args.Hsample, Nu])
@@ -260,16 +266,16 @@ def run_diffusion(args=None, env=None):
         #print("    step_env_jit warmed up with both initial state and evolved state")
         
         # Warm up rollout_us_jit with correct input shapes
-        print("  Warming up rollout_us_jit...")
+        logging.debug("  Warming up rollout_us_jit...")
         dummy_Y0 = jnp.zeros([args.Hsample, Nu])  # Correct shape for action sequence
         #print(f"    dummy_Y0 shape: {dummy_Y0.shape}")
         _, _ = rollout_us_jit(state_init, dummy_Y0)
         
         # Warm up rollout_us_with_terminal_jit
-        print("  Warming up rollout_us_with_terminal_jit...")
+        logging.debug("  Warming up rollout_us_with_terminal_jit...")
         _, _ = rollout_us_with_terminal_jit(state_init, dummy_Y0)
     else:
-        print("Skipping warmup - using cached JIT functions")
+        logging.debug("Skipping warmup - using cached JIT functions")
         warmup_start_time = time.time()
     
 
@@ -318,10 +324,10 @@ def run_diffusion(args=None, env=None):
     # Define the main reverse_once function that will be used for both warmup and actual computation
     # Check if we already have a cached version
     if reverse_once_cache_key in _jit_function_cache:
-        print(f"Using cached reverse_once function")
+        logging.debug(f"Using cached reverse_once function")
         reverse_once = _jit_function_cache[reverse_once_cache_key]
     else:
-        print(f"Creating new reverse_once function")
+        logging.debug(f"Creating new reverse_once function")
         @partial(jax.jit, static_argnums=(1,))
         def reverse_once(carry, config_params_tuple):
             """
@@ -409,7 +415,7 @@ def run_diffusion(args=None, env=None):
     
         # Warm up reverse_once function that will be used in actual computation
         # This ensures JIT compilation happens now with correct arguments, not during timing
-        print("  Warming up reverse_once...")
+        logging.debug("  Warming up reverse_once...")
         warmup_i = args.Ndiffuse - 1  # Valid index for warmup
         warmup_carry = (warmup_i, rng, YN)
         
@@ -423,16 +429,16 @@ def run_diffusion(args=None, env=None):
             Nu
         )
         
-        print(f"    warmup_carry shapes: i={warmup_i}, rng.shape={rng.shape}, YN.shape={YN.shape}")
-        print(f"    Using indices: alphas_bar[{warmup_i}], sigmas[{warmup_i}]")
+        logging.debug(f"    warmup_carry shapes: i={warmup_i}, rng.shape={rng.shape}, YN.shape={YN.shape}")
+        logging.debug(f"    Using indices: alphas_bar[{warmup_i}], sigmas[{warmup_i}]")
         _ = reverse_once(warmup_carry, warmup_config_params)  # This compiles the function with correct shapes
-        print("  reverse_once warmup completed")
+        logging.debug("  reverse_once warmup completed")
         
     warmup_time = time.time() - warmup_start_time
     if need_warmup:
-        print(f"JIT warmup completed in {warmup_time:.2f} seconds")
+        logging.debug(f"JIT warmup completed in {warmup_time:.2f} seconds")
     else:
-        print(f"JIT warmup skipped in {warmup_time:.2f} seconds")
+        logging.debug(f"JIT warmup skipped in {warmup_time:.2f} seconds")
 
     ## Run diffusion (actual computation)
     diffusion_setup_start_time = time.time()
@@ -442,12 +448,12 @@ def run_diffusion(args=None, env=None):
     )
     sigmas_cond = jnp.sqrt(Sigmas_cond)
     sigmas_cond = sigmas_cond.at[0].set(0.0)
-    print(f"init sigma = {sigmas[-1]:.2e}")
+    logging.debug(f"init sigma = {sigmas[-1]:.2e}")
 
     diffusion_setup_time = time.time() - diffusion_setup_start_time
 
     # Actual diffusion computation (this is what we want to time)
-    print("Starting diffusion computation...")
+    logging.debug("Starting diffusion computation...")
     #print(f"About to use YN.shape={YN.shape}, rng.shape={rng.shape}")
     pure_diffusion_start_time = time.time()
     
@@ -487,7 +493,7 @@ def run_diffusion(args=None, env=None):
     Ybars, Y0 = reverse(YN, rng_exp) # NOTE: YN: all zeros, one trajectory of actions 
     
     pure_diffusion_time = time.time() - pure_diffusion_start_time
-    print(f"Diffusion computation completed in {pure_diffusion_time:.3f}s")
+    logging.debug(f"Diffusion computation completed in {pure_diffusion_time:.3f}s")
     
     # Post-processing time
     post_processing_start_time = time.time()
@@ -598,19 +604,19 @@ def run_diffusion(args=None, env=None):
     # rew_final is already the total reward (mean + terminal), no need to call .mean()
     
     # Print detailed timing report
-    print("\n=== TIMING REPORT ===")
-    print(f"Total time:              {timing_info['total_time']:.3f}s")
-    print(f"Pure diffusion time:     {timing_info['pure_diffusion_time']:.3f}s ({timing_info['pure_diffusion_time']/timing_info['total_time']*100:.1f}%)")
-    print(f"Overhead time:           {timing_info['overhead_time']:.3f}s ({timing_info['overhead_time']/timing_info['total_time']*100:.1f}%)")
-    print(f"  - Demo generation:     {timing_info['demo_generation_time']:.3f}s")
-    print(f"  - Compilation total:   {timing_info['compilation_time']:.3f}s")
-    print(f"    * JIT setup:         {timing_info['jit_setup_time']:.3f}s")
-    print(f"    * JIT warmup:        {timing_info['warmup_time']:.3f}s")
-    print(f"    * Reward compile:    {timing_info['reward_compile_time']:.3f}s")
-    print(f"  - Diffusion setup:     {timing_info['diffusion_setup_time']:.3f}s")
-    print(f"  - Post-processing:     {timing_info['post_processing_time']:.3f}s")
-    print(f"Final reward:            {rew_final:.3e}")
-    print("=====================")
+    logging.debug("\n=== TIMING REPORT ===")
+    logging.debug(f"Total time:              {timing_info['total_time']:.3f}s")
+    logging.info(f"Pure diffusion time:     {timing_info['pure_diffusion_time']:.3f}s ({timing_info['pure_diffusion_time']/timing_info['total_time']*100:.1f}%)")
+    logging.debug(f"Overhead time:           {timing_info['overhead_time']:.3f}s ({timing_info['overhead_time']/timing_info['total_time']*100:.1f}%)")
+    logging.debug(f"  - Demo generation:     {timing_info['demo_generation_time']:.3f}s")
+    logging.debug(f"  - Compilation total:   {timing_info['compilation_time']:.3f}s")
+    logging.debug(f"    * JIT setup:         {timing_info['jit_setup_time']:.3f}s")
+    logging.debug(f"    * JIT warmup:        {timing_info['warmup_time']:.3f}s")
+    logging.debug(f"    * Reward compile:    {timing_info['reward_compile_time']:.3f}s")
+    logging.debug(f"  - Diffusion setup:     {timing_info['diffusion_setup_time']:.3f}s")
+    logging.debug(f"  - Post-processing:     {timing_info['post_processing_time']:.3f}s")
+    logging.debug(f"Final reward:            {rew_final:.3e}")
+    logging.debug("=====================")
 
     return rew_final, Y0, trajectory_states, timing_info
 
@@ -624,6 +630,15 @@ if __name__ == "__main__":
     # For standalone testing, use default config with demonstration enabled
     config = MBDConfig()
     
+    if config.verbose:
+        logging.basicConfig(level=logging.DEBUG)
+    else:
+        logging.basicConfig(level=logging.INFO)
+    
+    # Suppress JAX info messages about unavailable backends
+    logging.getLogger('jax._src.xla_bridge').setLevel(logging.WARNING)
+    logging.getLogger('jax').setLevel(logging.WARNING)
+    
     # Create environment
     env = mbd.envs.get_env(
         config.env_name, 
@@ -632,9 +647,9 @@ if __name__ == "__main__":
         H=config.Hsample,
         motion_preference=config.motion_preference,
         collision_penalty=config.collision_penalty,
-        enable_collision_projection=config.enable_collision_projection,
+        enable_gated_rollout_collision=config.enable_gated_rollout_collision,
         hitch_penalty=config.hitch_penalty,
-        enable_hitch_projection=config.enable_hitch_projection,
+        enable_gated_rollout_hitch=config.enable_gated_rollout_hitch,
         reward_threshold=config.reward_threshold,
         ref_reward_threshold=config.ref_reward_threshold,
         max_w_theta=config.max_w_theta,
@@ -648,6 +663,9 @@ if __name__ == "__main__":
         # input constraints
         v_max=config.v_max,
         delta_max_deg=config.delta_max_deg,
+        # acceleration control constraints
+        a_max=config.a_max,
+        omega_max=config.omega_max,
         # reward shaping parameters
         d_thr_factor=config.d_thr_factor,
         k_switch=config.k_switch,
@@ -664,7 +682,7 @@ if __name__ == "__main__":
     # Set initial position using geometric parameters relative to parking lot
     # dx: distance from tractor front face to target parking space center
     # dy: distance from tractor to parking lot entrance line
-    env.set_init_pos(dx=-3.0, dy=4.0, theta1=0, theta2=0)
+    env.set_init_pos(dx=9.0, dy=2.0, theta1=0, theta2=0)
     if config.motion_preference == -2:
         env.set_init_pos(dx=-12.0, dy=1.0, theta1=jnp.pi, theta2=jnp.pi)
     # Set goal angles based on motion preference
@@ -673,5 +691,3 @@ if __name__ == "__main__":
     
     rew_final, Y0, trajectory_states, timing_info = run_diffusion(args=config, env=env)
     end_time = time.time()
-    print(f"Time taken: {end_time - start_time:.2f} seconds")
-    print(f"final reward = {rew_final:.2e}")

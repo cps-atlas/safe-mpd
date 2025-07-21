@@ -7,6 +7,7 @@ Integration tests for the MBD planner with various scenarios.
 
 import unittest
 import time
+import logging
 from typing import Optional
 
 try:
@@ -16,6 +17,8 @@ try:
         create_demo_variant, 
         list_default_scenarios,
         list_demo_scenarios,
+        list_kinematic_scenarios,
+        list_acceleration_scenarios,
         get_scenario_pairs
     )
 except ImportError:
@@ -26,6 +29,8 @@ except ImportError:
         create_demo_variant, 
         list_default_scenarios,
         list_demo_scenarios,
+        list_kinematic_scenarios,
+        list_acceleration_scenarios,
         get_scenario_pairs
     )
 
@@ -62,10 +67,10 @@ class TestMBDPlanner(BaseMBDTest):
         
         reward, actions, states, timing = self.run_mbd_test(config)
         
-        print(f"Test completed: {config.test_name}")
-        print(f"Final reward: {reward:.4f}")
-        print(f"Pure diffusion time: {timing['pure_diffusion_time']:.2f}s")
-        print(f"Total time: {timing['total_time']:.2f}s")
+        logging.debug(f"Test completed: {config.test_name}")
+        logging.debug(f"Final reward: {reward:.4f}")
+        logging.debug(f"Pure diffusion time: {timing['pure_diffusion_time']:.2f}s")
+        logging.debug(f"Total time: {timing['total_time']:.2f}s")
         
         return reward, actions, states, timing
 
@@ -111,20 +116,62 @@ class TestMBDPlanner(BaseMBDTest):
         """Test parking with strict backward enforcement with demonstration"""
         self.run_scenario_test("parking_enforce_backward_demo", visualize=visualize)
 
+    # === Acceleration Dynamics Tests (No Demonstration) ===
+    def test_acc_parking_basic_forward(self, visualize: Optional[bool] = None):
+        """Test basic forward parking scenario with acceleration dynamics (no demonstration)"""
+        self.run_scenario_test("acc_parking_basic_forward", visualize=visualize)
+
+    def test_acc_parking_basic_backward(self, visualize: Optional[bool] = None):
+        """Test basic backward parking scenario with acceleration dynamics (no demonstration)"""
+        self.run_scenario_test("acc_parking_basic_backward", visualize=visualize)
+
+    def test_acc_parking_no_preference(self, visualize: Optional[bool] = None):
+        """Test parking with no motion preference with acceleration dynamics (no demonstration)"""
+        self.run_scenario_test("acc_parking_no_preference", visualize=visualize)
+
+    def test_acc_parking_enforce_forward(self, visualize: Optional[bool] = None):
+        """Test parking with strict forward enforcement with acceleration dynamics (no demonstration)"""
+        self.run_scenario_test("acc_parking_enforce_forward", visualize=visualize)
+
+    def test_acc_parking_enforce_backward(self, visualize: Optional[bool] = None):
+        """Test parking with strict backward enforcement with acceleration dynamics (no demonstration)"""
+        self.run_scenario_test("acc_parking_enforce_backward", visualize=visualize)
+
+    # === Acceleration Dynamics Demo Tests (With Demonstration) ===
+    def test_acc_parking_basic_forward_demo(self, visualize: Optional[bool] = None):
+        """Test basic forward parking scenario with acceleration dynamics and demonstration"""
+        self.run_scenario_test("acc_parking_basic_forward_demo", visualize=visualize)
+
+    def test_acc_parking_basic_backward_demo(self, visualize: Optional[bool] = None):
+        """Test basic backward parking scenario with acceleration dynamics and demonstration"""
+        self.run_scenario_test("acc_parking_basic_backward_demo", visualize=visualize)
+
+    def test_acc_parking_no_preference_demo(self, visualize: Optional[bool] = None):
+        """Test parking with no motion preference with acceleration dynamics and demonstration"""
+        self.run_scenario_test("acc_parking_no_preference_demo", visualize=visualize)
+
+    def test_acc_parking_enforce_forward_demo(self, visualize: Optional[bool] = None):
+        """Test parking with strict forward enforcement with acceleration dynamics and demonstration"""
+        self.run_scenario_test("acc_parking_enforce_forward_demo", visualize=visualize)
+
+    def test_acc_parking_enforce_backward_demo(self, visualize: Optional[bool] = None):
+        """Test parking with strict backward enforcement with acceleration dynamics and demonstration"""
+        self.run_scenario_test("acc_parking_enforce_backward_demo", visualize=visualize)
+
     # === Utility Tests ===
     def test_demo_flag_override(self, visualize: Optional[bool] = None):
         """Test that demo flag override works correctly"""
         # Test running a default scenario with demo enabled
-        print("\n--- Testing demo flag override: default scenario with enable_demo=True ---")
+        logging.debug("\n--- Testing demo flag override: default scenario with enable_demo=True ---")
         reward_with_demo, _, _, _ = self.run_scenario_test("parking_basic_forward", enable_demo=True, visualize=visualize)
         
         # Test running a demo scenario with demo disabled
-        print("\n--- Testing demo flag override: demo scenario with enable_demo=False ---") 
+        logging.debug("\n--- Testing demo flag override: demo scenario with enable_demo=False ---") 
         reward_no_demo, _, _, _ = self.run_scenario_test("parking_basic_forward", enable_demo=False, visualize=visualize)
         
         # Both should run without errors - exact reward comparison depends on randomness
-        print(f"With-demo reward: {reward_with_demo:.4f}")
-        print(f"No-demo reward: {reward_no_demo:.4f}")
+        logging.debug(f"With-demo reward: {reward_with_demo:.4f}")
+        logging.debug(f"No-demo reward: {reward_no_demo:.4f}")
         
         # Basic sanity check - both should be valid rewards
         self.assertGreater(reward_with_demo, -10.0)
@@ -134,16 +181,22 @@ class TestMBDPlanner(BaseMBDTest):
         """Test that scenario listing functions work correctly"""
         default_scenarios = list_default_scenarios()
         demo_scenarios = list_demo_scenarios()
+        kinematic_scenarios = list_kinematic_scenarios()
+        acceleration_scenarios = list_acceleration_scenarios()
         scenario_pairs = get_scenario_pairs()
         
-        print(f"Default scenarios: {default_scenarios}")
-        print(f"Demo scenarios: {demo_scenarios}")
-        print(f"Scenario pairs: {scenario_pairs}")
+        logging.debug(f"Default scenarios: {default_scenarios}")
+        logging.debug(f"Demo scenarios: {demo_scenarios}")
+        logging.debug(f"Kinematic scenarios: {kinematic_scenarios}")
+        logging.debug(f"Acceleration scenarios: {acceleration_scenarios}")
+        logging.debug(f"Scenario pairs: {scenario_pairs}")
         
         # Check that we have the expected number of scenarios
-        self.assertEqual(len(default_scenarios), 5)  # 5 base scenarios
-        self.assertEqual(len(demo_scenarios), 5)  # 5 demo versions
-        self.assertEqual(len(scenario_pairs), 5)  # 5 pairs
+        self.assertEqual(len(default_scenarios), 10)  # 5 kinematic + 5 acceleration base scenarios (no demo)
+        self.assertEqual(len(demo_scenarios), 10)  # 5 kinematic + 5 acceleration demo versions
+        self.assertEqual(len(kinematic_scenarios), 10)  # 5 base + 5 demo kinematic scenarios
+        self.assertEqual(len(acceleration_scenarios), 10)  # 5 base + 5 demo acceleration scenarios
+        self.assertEqual(len(scenario_pairs), 10)  # 5 kinematic + 5 acceleration pairs
         
         # Check that all default scenarios don't end with _demo
         for scenario in default_scenarios:
@@ -152,6 +205,14 @@ class TestMBDPlanner(BaseMBDTest):
         # Check that all demo scenarios end with _demo
         for scenario in demo_scenarios:
             self.assertTrue(scenario.endswith("_demo"))
+        
+        # Check kinematic scenarios start with "parking_"
+        for scenario in kinematic_scenarios:
+            self.assertTrue(scenario.startswith("parking_"))
+        
+        # Check acceleration scenarios start with "acc_parking_"
+        for scenario in acceleration_scenarios:
+            self.assertTrue(scenario.startswith("acc_parking_"))
         
         # Check that pairs are correctly formed
         for default_name, demo_name in scenario_pairs:

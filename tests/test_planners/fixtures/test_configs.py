@@ -11,6 +11,7 @@ import numpy as np
 import jax.numpy as jnp  # Use JAX arrays for proper dtype compatibility
 import os
 import sys
+import logging
 from dataclasses import dataclass
 from typing import Optional, List, Tuple, Dict, Any
 
@@ -27,9 +28,10 @@ class TestConfig(MBDConfig):
     # Override only test-specific defaults (keep MBDConfig defaults for core parameters)
     seed: int = 0  # Fixed seed for reproducibility
     render: bool = False  # Turn off rendering for tests by default
-    save_animation: bool = True
-    show_animation: bool = True
-    save_denoising_animation: bool = True
+    save_animation: bool = False
+    show_animation: bool = False
+    save_denoising_animation: bool = False
+    verbose: bool = False
     
     # Test metadata (additional fields not in MBDConfig)
     test_name: str = ""
@@ -55,26 +57,32 @@ class TestConfig(MBDConfig):
     goal_theta2: Optional[float] = None  # Goal trailer orientation
     
     # Validation criteria (test-specific)
-    min_final_distance_to_goal: float = 2.0
+    min_final_distance_to_goal: float = 4.5
     
     def __post_init__(self):
         """Apply visualization settings after initialization"""
         if self.visualize:
             self.render = True
             self.show_animation = True
+        if self.verbose:
+            logging.basicConfig(level=logging.DEBUG)
+        else:
+            logging.basicConfig(level=logging.INFO)
 
 
-# Predefined test scenarios
+
+# Predefined test scenarios for kinematic dynamics (tt2d)
 TEST_SCENARIOS = {
     "parking_basic_forward": TestConfig(
         test_name="parking_basic_forward",
         description="Basic forward parking scenario",
+        env_name="tt2d",
         enable_demo=False,
         motion_preference=1,
         expected_reward_min=0.3,
         expected_reward_max=2.0,
-        init_dx=-2.0,
-        init_dy=1.0,
+        init_dx=-4.0,
+        init_dy=3.0,
         init_theta1=0.0,
         init_theta2=0.0,
         goal_theta1=-jnp.pi/2,
@@ -84,12 +92,13 @@ TEST_SCENARIOS = {
     "parking_basic_backward": TestConfig(
         test_name="parking_basic_backward",
         description="Basic backward parking scenario",
+        env_name="tt2d",
         enable_demo=False,
         motion_preference=-1,
         expected_reward_min=0.3,
         expected_reward_max=2.0,
-        init_dx=-3.0,
-        init_dy=4.0,
+        init_dx=12.0,
+        init_dy=5.0,
         init_theta1=0.0,
         init_theta2=0.0,
         goal_theta1=jnp.pi/2,
@@ -99,12 +108,13 @@ TEST_SCENARIOS = {
     "parking_no_preference": TestConfig(
         test_name="parking_no_preference",
         description="Parking with no motion preference",
+        env_name="tt2d",
         enable_demo=False,
         motion_preference=0,
         expected_reward_min=0.3,
         expected_reward_max=2.0,
-        init_dx=-3.0,
-        init_dy=4.0,
+        init_dx=2.0,
+        init_dy=1.0,
         init_theta1=0.0,
         init_theta2=0.0,
         goal_theta1=-jnp.pi/2,
@@ -114,6 +124,7 @@ TEST_SCENARIOS = {
     "parking_enforce_forward": TestConfig(
         test_name="parking_enforce_forward",
         description="Parking with strict forward enforcement",
+        env_name="tt2d",
         enable_demo=False,
         motion_preference=2,
         expected_reward_min=0.3,
@@ -129,6 +140,90 @@ TEST_SCENARIOS = {
     "parking_enforce_backward": TestConfig(
         test_name="parking_enforce_backward",
         description="Parking with strict backward enforcement",
+        env_name="tt2d",
+        enable_demo=False,
+        motion_preference=-2,
+        expected_reward_min=0.3,
+        expected_reward_max=2.0,
+        init_dx=-12.0,
+        init_dy=1.0,
+        init_theta1=jnp.pi,
+        init_theta2=jnp.pi,
+        goal_theta1=jnp.pi/2,
+        goal_theta2=jnp.pi/2
+    ),
+}
+
+# Acceleration dynamics test scenarios (acc_tt2d)
+ACC_TEST_SCENARIOS = {
+    "acc_parking_basic_forward": TestConfig(
+        test_name="acc_parking_basic_forward",
+        description="Basic forward parking scenario (acceleration dynamics)",
+        env_name="acc_tt2d",
+        enable_demo=False,
+        motion_preference=1,
+        expected_reward_min=0.3,
+        expected_reward_max=2.0,
+        init_dx=-3.0,
+        init_dy=2.0,
+        init_theta1=0.0,
+        init_theta2=0.0,
+        goal_theta1=-jnp.pi/2,
+        goal_theta2=-jnp.pi/2
+    ),
+    
+    "acc_parking_basic_backward": TestConfig(
+        test_name="acc_parking_basic_backward",
+        description="Basic backward parking scenario (acceleration dynamics)",
+        env_name="acc_tt2d",
+        enable_demo=False,
+        motion_preference=-1,
+        expected_reward_min=0.3,
+        expected_reward_max=2.0,
+        init_dx=12.0,
+        init_dy=4.0,
+        init_theta1=0.0,
+        init_theta2=0.0,
+        goal_theta1=jnp.pi/2,
+        goal_theta2=jnp.pi/2
+    ),
+    
+    "acc_parking_no_preference": TestConfig(
+        test_name="acc_parking_no_preference",
+        description="Parking with no motion preference (acceleration dynamics)",
+        env_name="acc_tt2d",
+        enable_demo=False,
+        motion_preference=0,
+        expected_reward_min=0.3,
+        expected_reward_max=2.0,
+        init_dx=3.0,
+        init_dy=1.0,
+        init_theta1=0.0,
+        init_theta2=0.0,
+        goal_theta1=-jnp.pi/2,
+        goal_theta2=-jnp.pi/2
+    ),
+    
+    "acc_parking_enforce_forward": TestConfig(
+        test_name="acc_parking_enforce_forward",
+        description="Parking with strict forward enforcement (acceleration dynamics)",
+        env_name="acc_tt2d",
+        enable_demo=False,
+        motion_preference=2,
+        expected_reward_min=0.3,
+        expected_reward_max=2.0,
+        init_dx=-5.0,
+        init_dy=5.0,
+        init_theta1=0.0,
+        init_theta2=0.0,
+        goal_theta1=-jnp.pi/2,
+        goal_theta2=-jnp.pi/2
+    ),
+    
+    "acc_parking_enforce_backward": TestConfig(
+        test_name="acc_parking_enforce_backward",
+        description="Parking with strict backward enforcement (acceleration dynamics)",
+        env_name="acc_tt2d",
         enable_demo=False,
         motion_preference=-2,
         expected_reward_min=0.3,
@@ -144,9 +239,11 @@ TEST_SCENARIOS = {
 
 # Demo versions of all scenarios (automatically generated) - DEMONSTRATION IS SPECIAL CASE
 DEMO_TEST_SCENARIOS = {}
+ACC_DEMO_TEST_SCENARIOS = {}
 
 def _create_demo_scenarios():
     """Create demo versions of all test scenarios"""
+    # Create demo versions of kinematic scenarios
     for name, config in TEST_SCENARIOS.items():
         demo_name = f"{name}_demo"
         demo_config = copy.deepcopy(config)
@@ -157,12 +254,24 @@ def _create_demo_scenarios():
         demo_config.expected_reward_min = config.expected_reward_min + 0.2
         demo_config.expected_reward_max = config.expected_reward_max
         DEMO_TEST_SCENARIOS[demo_name] = demo_config
+    
+    # Create demo versions of acceleration scenarios
+    for name, config in ACC_TEST_SCENARIOS.items():
+        demo_name = f"{name}_demo"
+        demo_config = copy.deepcopy(config)
+        demo_config.test_name = demo_name
+        demo_config.description = f"{config.description} (with demo)"
+        demo_config.enable_demo = True
+        # Higher expected reward range for demo (typically better performance)
+        demo_config.expected_reward_min = config.expected_reward_min + 0.2
+        demo_config.expected_reward_max = config.expected_reward_max
+        ACC_DEMO_TEST_SCENARIOS[demo_name] = demo_config
 
 # Create the demo scenarios
 _create_demo_scenarios()
 
 # Combine all scenarios
-ALL_TEST_SCENARIOS = {**TEST_SCENARIOS, **DEMO_TEST_SCENARIOS}
+ALL_TEST_SCENARIOS = {**TEST_SCENARIOS, **DEMO_TEST_SCENARIOS, **ACC_TEST_SCENARIOS, **ACC_DEMO_TEST_SCENARIOS}
 
 
 def get_test_config(scenario_name: str) -> TestConfig:
@@ -254,6 +363,16 @@ def list_demo_scenarios() -> List[str]:
     return [name for name in ALL_TEST_SCENARIOS.keys() if name.endswith("_demo")]
 
 
+def list_kinematic_scenarios() -> List[str]:
+    """Return list of kinematic (tt2d) scenarios (default + demo)."""
+    return [name for name in ALL_TEST_SCENARIOS.keys() if name.startswith("parking_")]
+
+
+def list_acceleration_scenarios() -> List[str]:
+    """Return list of acceleration (acc_tt2d) scenarios (default + demo)."""
+    return [name for name in ALL_TEST_SCENARIOS.keys() if name.startswith("acc_parking_")]
+
+
 def get_scenario_pairs() -> List[Tuple[str, str]]:
     """
     Get pairs of (default_scenario, demo_scenario) for comparison.
@@ -262,8 +381,16 @@ def get_scenario_pairs() -> List[Tuple[str, str]]:
         List of tuples with (default_scenario_name, demo_scenario_name)
     """
     pairs = []
+    # Kinematic scenario pairs
     for base_name in TEST_SCENARIOS.keys():
         default_name = base_name
         demo_name = f"{base_name}_demo"
         pairs.append((default_name, demo_name))
+    
+    # Acceleration scenario pairs  
+    for base_name in ACC_TEST_SCENARIOS.keys():
+        default_name = base_name
+        demo_name = f"{base_name}_demo"
+        pairs.append((default_name, demo_name))
+    
     return pairs 

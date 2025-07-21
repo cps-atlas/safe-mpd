@@ -4,6 +4,7 @@ from flax import struct
 from functools import partial
 import matplotlib.pyplot as plt
 import numpy as np
+import logging
 from matplotlib.transforms import Affine2D
 
 import mbd
@@ -41,8 +42,8 @@ class TractorTrailer2d:
     Input constraint: v ∈ [-1, 1], delta ∈ [-55°, 55°]
     """
     def __init__(self, x0=None, xg=None, env_config=None, case="parking", dt=0.2, H=50, motion_preference=0, 
-                 collision_penalty=0.15, enable_collision_projection=False, hitch_penalty=0.10, 
-                 enable_hitch_projection=True, reward_threshold=25.0, ref_reward_threshold=5.0,
+                 collision_penalty=0.15, enable_gated_rollout_collision=False, hitch_penalty=0.10, 
+                 enable_gated_rollout_hitch=True, reward_threshold=25.0, ref_reward_threshold=5.0,
                  max_w_theta=0.75, hitch_angle_weight=0.2, l1=3.23, l2=2.9, lh=1.15, 
                  tractor_width=2.0, trailer_width=2.5, v_max=3.0, delta_max_deg=55.0,
                  d_thr_factor=1.0, k_switch=2.5, steering_weight=0.05, preference_penalty_weight=0.05,
@@ -56,9 +57,9 @@ class TractorTrailer2d:
         
         # Collision handling parameters
         self.collision_penalty = collision_penalty
-        self.enable_collision_projection = enable_collision_projection
+        self.enable_gated_rollout_collision = enable_gated_rollout_collision
         self.hitch_penalty = hitch_penalty
-        self.enable_hitch_projection = enable_hitch_projection
+        self.enable_gated_rollout_hitch = enable_gated_rollout_hitch
         
         # Reward thresholds
         self.reward_threshold = reward_threshold
@@ -195,7 +196,7 @@ class TractorTrailer2d:
         elif x is not None and y is not None:
             # Direct coordinate specification
             self.x0 = jnp.array([x, y, theta1, theta2])
-            print(f"overwrite x0: {self.x0}")
+            logging.debug(f"overwrite x0: {self.x0}")
         else:
             # Default case1 values
             x = x if x is not None else -3.0
@@ -225,7 +226,7 @@ class TractorTrailer2d:
             new_theta2 = theta2 if theta2 is not None else np.pi
             
         self.xg = jnp.array([new_x, new_y, new_theta1, new_theta2])
-        print(f"overwrite xg: {self.xg}")
+        logging.debug(f"overwrite xg: {self.xg}")
         
     def set_rectangle_obs(self, rectangles, coordinate_mode="left-top", padding=0.0):
         """Set rectangular obstacles"""
@@ -272,43 +273,98 @@ class TractorTrailer2d:
         u_scaled = self.input_scaler(action)
         
         q = state.pipeline_state
-        q_new = rk4(self.tractor_trailer_dynamics, state.pipeline_state, u_scaled, self.dt)
         
-        # Check obstacle collision and hitch angle violation separately
-        obstacle_collision = self.check_obstacle_collision(q_new, self.obs_circles, self.obs_rectangles)
-        hitch_violation = self.check_hitch_violation(q_new)
+        # Conditionally use gated rollout or simple forward step based on configuration
+        use_gated_rollout = self.enable_gated_rollout_collision | self.enable_gated_rollout_hitch
         
-        # Apply different projections based on type of violation
-        # Obstacle collision: use collision projection setting
-        # Hitch violation: use hitch projection setting
-        q_after_collision_proj = jnp.where(self.enable_collision_projection & obstacle_collision, q, q_new)
-        q = jnp.where(self.enable_hitch_projection & hitch_violation, q, q_after_collision_proj)
+        q_final, obstacle_collision, hitch_violation = jax.lax.cond(
+            use_gated_rollout,
+            self._step_with_gated_rollout,
+            self._step_without_gated_rollout,
+            (q, u_scaled)
+        )
         
-        # Compute reward: normal reward if no collision/violation, penalty if collision/hitch violation
-        reward = self.get_reward(q)
+        # Compute reward
+        reward = self.get_reward(q_final)
+        
+        # Apply penalties using flags (only if violations were checked)
         reward = jnp.where(obstacle_collision, reward - self.collision_penalty, reward)
         reward = jnp.where(hitch_violation, reward - self.hitch_penalty, reward)
         
         # Add preference penalty based on motion direction
-        # Use JAX conditional operations instead of Python if
         preference_penalty = self.get_preference_penalty(u_scaled)
         has_preference = self.motion_preference != 0
         reward = jnp.where(has_preference, reward - preference_penalty, reward)
         
-        return state.replace(pipeline_state=q, obs=q, reward=reward, done=0.0)
+        return state.replace(pipeline_state=q_final, obs=q_final, reward=reward, done=0.0)
 
     @partial(jax.jit, static_argnums=(0,))
-    def get_preference_penalty(self, u):
+    def _step_with_gated_rollout(self, data):
+        """Step function with gated rollout enabled"""
+        q, u_scaled = data
+        return self.gated_rollout(q, u_scaled)
+    
+    @partial(jax.jit, static_argnums=(0,))
+    def _step_without_gated_rollout(self, data):
+        """Step function with simple forward dynamics (no gated rollout)"""
+        q, u_scaled = data
+        
+        # Simple forward propagate one step
+        q_new = rk4(self.tractor_trailer_dynamics, q, u_scaled, self.dt)
+        
+        # Check collision and hitch violations on q_new (for penalty computation)
+        obstacle_collision = self.check_obstacle_collision(q_new, self.obs_circles, self.obs_rectangles)
+        hitch_violation = self.check_hitch_violation(q_new)
+        
+        return q_new, obstacle_collision, hitch_violation
+
+    @partial(jax.jit, static_argnums=(0,))
+    def gated_rollout(self, q, u):
+        """
+        Gated rollout for kinematic dynamics.
+        This extracts the existing safety logic into a reusable function.
+        Returns both final state and collision/violation flags to avoid recomputation.
+        """
+        # Forward propagate one step
+        q_proposed = rk4(self.tractor_trailer_dynamics, q, u, self.dt)
+        
+        # Check obstacle collision and hitch angle violation separately
+        obstacle_collision = self.check_obstacle_collision(q_proposed, self.obs_circles, self.obs_rectangles)
+        hitch_violation = self.check_hitch_violation(q_proposed)
+        
+        # Apply different projections based on type of violation
+        # Obstacle collision: use gated rollout collision setting
+        # Hitch violation: use gated rollout hitch setting
+        q_gated = jnp.where(self.enable_gated_rollout_collision & obstacle_collision, q, q_proposed)
+        q_final = jnp.where(self.enable_gated_rollout_hitch & hitch_violation, q, q_gated)
+        
+        return q_final, obstacle_collision, hitch_violation
+
+    @partial(jax.jit, static_argnums=(0,))
+    def get_preference_penalty(self, x_or_u, u=None):
         """
         Calculate preference penalty based on movement direction.
         
         Args:
-            u: scaled input [v, delta] where v is velocity
+            x_or_u: For kinematic model, this is u (scaled input [v, delta]).
+                   For acceleration model, this is x (state) and u is provided separately.
+            u: Optional scaled control input, used when x_or_u is state x.
             
         Returns:
             penalty: small penalty for non-preferred movement direction
         """
-        v, delta = u
+        # Determine if this is kinematic (u only) or acceleration dynamics (x and u)
+        if u is None:
+            # Kinematic model: x_or_u is actually u (scaled input)
+            v, delta = x_or_u
+        else:
+            # Acceleration model: x_or_u is state x, extract velocity from state
+            # For kinematic model fallback, extract from control input
+            if len(x_or_u) >= 5:  # 6D state (acceleration model)
+                v = x_or_u[4]  # Extract velocity from state
+            else:  # 4D state, use control input
+                v, delta = u
+        
         penalty_weight = self.preference_penalty_weight  # Configurable penalty weight for stronger preference enforcement
         
         # Forward preference penalty (penalize backward movement)
@@ -326,7 +382,6 @@ class TractorTrailer2d:
         is_forward_enforce = self.motion_preference == 2
         is_backward_enforce = self.motion_preference == -2
         
-        # Use nested jnp.where to handle all cases
         # For strict enforcement (2, -2), no penalty is needed since motion is already constrained
         penalty = jnp.where(is_forward_pref, forward_penalty,
                            jnp.where(is_backward_pref, backward_penalty,
@@ -347,12 +402,12 @@ class TractorTrailer2d:
         """
         import numpy as np
         
-        print(f"Generating NEW demonstration trajectory with motion_preference={motion_preference}")
+        logging.debug(f"Generating NEW demonstration trajectory with motion_preference={motion_preference}")
         
         # Extract start and goal positions
         x0_pos = self.x0[:2]
         xg_pos = self.xg[:2]
-        print(f"Demo trajectory: x0_pos={x0_pos}, xg_pos={xg_pos}")
+        logging.debug(f"Demo trajectory: x0_pos={x0_pos}, xg_pos={xg_pos}")
         
         # List to store waypoints
         waypoints = [x0_pos]
@@ -512,11 +567,11 @@ class TractorTrailer2d:
         
         # Find which segment is the final one (last waypoint to goal)
         final_segment_idx = len(waypoints) - 2 if len(waypoints) > 1 else 0
-        print(f"Final segment index: {final_segment_idx} out of {len(waypoints)-1} segments")
+        logging.debug(f"Final segment index: {final_segment_idx} out of {len(waypoints)-1} segments")
         
         # Create angle constraint mask: True only for points in the final segment
         angle_mask = segment_indices == final_segment_idx
-        print(f"Angle constraints will be applied to {np.sum(angle_mask)} out of {len(angle_mask)} points")
+        logging.debug(f"Angle constraints will be applied to {np.sum(angle_mask)} out of {len(angle_mask)} points")
         
         for i in range(num_points-1):
             dx = points_2d[i+1, 0] - points_2d[i, 0]
@@ -549,7 +604,7 @@ class TractorTrailer2d:
         self.xref = jnp.array(xref)
         self.angle_mask = jnp.array(angle_mask)  # Store the angle constraint mask
         
-        print(f"Demo trajectory UPDATED: start=({self.xref[0,0]:.2f},{self.xref[0,1]:.2f}), end=({self.xref[-1,0]:.2f},{self.xref[-1,1]:.2f}), motion_pref={motion_preference}")
+        logging.debug(f"Demo trajectory UPDATED: start=({self.xref[0,0]:.2f},{self.xref[0,1]:.2f}), end=({self.xref[-1,0]:.2f},{self.xref[-1,1]:.2f}), motion_pref={motion_preference}")
         
         return self.xref
     
@@ -569,9 +624,9 @@ class TractorTrailer2d:
             # Add separate terminal reward
             terminal_reward = self.get_terminal_reward(self.xref[-1])
             self.rew_xref = stage_reward_mean + self.terminal_reward_weight * terminal_reward
-            #print(f"Reference trajectory reward compiled: {self.rew_xref:.3f}")
+            #logging.debug(f"Reference trajectory reward compiled: {self.rew_xref:.3f}")
         else:
-            print("Warning: No reference trajectory set. Call generate_demonstration_trajectory first.")
+            logging.warning("Warning: No reference trajectory set. Call generate_demonstration_trajectory first.")
 
     @partial(jax.jit, static_argnums=(0,))
     def get_reward(self, q):
@@ -595,7 +650,7 @@ class TractorTrailer2d:
         trailer_pos = self.get_trailer_position(q)
         
         # Compute trailer goal position from goal state
-        trailer_goal = self.get_trailer_position(self.xg)
+        trailer_goal = self.get_trailer_position(self.xg[:4])
         
         trailer_dist = jnp.linalg.norm(trailer_pos - trailer_goal)
         trailer_reward = (
@@ -682,7 +737,7 @@ class TractorTrailer2d:
         trailer_pos = self.get_trailer_position(q)
         
         # Compute trailer goal position from goal state
-        trailer_goal = self.get_trailer_position(self.xg)
+        trailer_goal = self.get_trailer_position(self.xg[:4])
         
         # ---------------------------------------------------------------
         # 1. positional reward - use different position based on preference
@@ -696,43 +751,43 @@ class TractorTrailer2d:
         d_pos = jnp.where(use_tractor_tracking, d_pos_tractor, d_pos_trailer)
         r_pos = 1.0 - (jnp.clip(d_pos, 0., self.terminal_reward_threshold) / self.terminal_reward_threshold) ** 2
         
+        # # ---------------------------------------------------------------
+        # # 2. heading-to-goal alignment
+        # wrap_pi = lambda a: (a + jnp.pi) % (2.*jnp.pi) - jnp.pi
+        
+        # # Handle angle errors based on motion preference
+        # e_theta1_direct = wrap_pi(theta1 - thetag)
+        # e_theta2_direct = wrap_pi(theta2 - thetag)
+        # total_err_direct = jnp.abs(e_theta1_direct) + jnp.abs(e_theta2_direct)
+        
+        # # Try offset by π (opposite orientation) 
+        # e_theta1_offset = wrap_pi(theta1 - thetag - jnp.pi)
+        # e_theta2_offset = wrap_pi(theta2 - thetag - jnp.pi)
+        # total_err_offset = jnp.abs(e_theta1_offset) + jnp.abs(e_theta2_offset)
+        
+        # # Choose orientation with smaller total error (for no preference case)
+        # use_direct = total_err_direct < total_err_offset
+        # e_theta1_wrapped = jnp.where(use_direct, e_theta1_direct, e_theta1_offset)
+        # e_theta2_wrapped = jnp.where(use_direct, e_theta2_direct, e_theta2_offset)
+        
+        # # Select final angles: use wrapping only when no preference, direct otherwise
+        # no_preference = self.motion_preference == 0
+        # e_theta1 = jnp.where(no_preference, e_theta1_wrapped, e_theta1_direct)
+        # e_theta2 = jnp.where(no_preference, e_theta2_wrapped, e_theta2_direct)
+        
+        # r_hdg = self.heading_reward_weight * (1.0 - (jnp.abs(e_theta1) / self.theta_max) ** 2
+        #               + 1.0 - (jnp.abs(e_theta2) / self.theta_max) ** 2)
+        
         # ---------------------------------------------------------------
-        # 2. heading-to-goal alignment
-        wrap_pi = lambda a: (a + jnp.pi) % (2.*jnp.pi) - jnp.pi
-        
-        # Handle angle errors based on motion preference
-        e_theta1_direct = wrap_pi(theta1 - thetag)
-        e_theta2_direct = wrap_pi(theta2 - thetag)
-        total_err_direct = jnp.abs(e_theta1_direct) + jnp.abs(e_theta2_direct)
-        
-        # Try offset by π (opposite orientation) 
-        e_theta1_offset = wrap_pi(theta1 - thetag - jnp.pi)
-        e_theta2_offset = wrap_pi(theta2 - thetag - jnp.pi)
-        total_err_offset = jnp.abs(e_theta1_offset) + jnp.abs(e_theta2_offset)
-        
-        # Choose orientation with smaller total error (for no preference case)
-        use_direct = total_err_direct < total_err_offset
-        e_theta1_wrapped = jnp.where(use_direct, e_theta1_direct, e_theta1_offset)
-        e_theta2_wrapped = jnp.where(use_direct, e_theta2_direct, e_theta2_offset)
-        
-        # Select final angles: use wrapping only when no preference, direct otherwise
-        no_preference = self.motion_preference == 0
-        e_theta1 = jnp.where(no_preference, e_theta1_wrapped, e_theta1_direct)
-        e_theta2 = jnp.where(no_preference, e_theta2_wrapped, e_theta2_direct)
-        
-        r_hdg = self.heading_reward_weight * (1.0 - (jnp.abs(e_theta1) / self.theta_max) ** 2
-                      + 1.0 - (jnp.abs(e_theta2) / self.theta_max) ** 2)
-        
-        # ---------------------------------------------------------------
-        # 3. terminal reward with fixed 0.5 weighting (no logistic switch)
-        terminal_reward = 0.5 * r_pos + 0.5 * r_hdg
+        # 3. terminal reward, currently only using position reward
+        terminal_reward = r_pos
         return terminal_reward
 
     
     @partial(jax.jit, static_argnums=(0,))
     def get_trailer_position(self, x):
         """Get the trailer center position from state"""
-        px, py, theta1, theta2 = x
+        px, py, theta1, theta2 = x[:4]
         
         # Hitch point (at rear of tractor)
         hitch_x = px - self.lh * jnp.cos(theta1)
@@ -747,7 +802,7 @@ class TractorTrailer2d:
     @partial(jax.jit, static_argnums=(0,))
     def get_tractor_trailer_rectangles(self, x):
         """Get the corner points of tractor and trailer rectangles for collision checking"""
-        px, py, theta1, theta2 = x
+        px, py, theta1, theta2 = x[:4]
         
         # Tractor rectangle (centered at tractor center)
         tractor_center_x = px + (self.l1/2) * jnp.cos(theta1)
@@ -1182,7 +1237,7 @@ class TractorTrailer2d:
 
     def get_tractor_trailer_positions(self, x):
         """Calculate tractor and trailer positions and orientations"""
-        px, py, theta1, theta2 = x
+        px, py, theta1, theta2 = x[:4]
         
         # Tractor position (rear axle center)
         tractor_rear_x = px
@@ -1216,7 +1271,7 @@ class TractorTrailer2d:
 
     def render_rigid_body(self, x, u=None):
         """Return the transforms to render the tractor-trailer system"""
-        px, py, theta1, theta2 = x
+        px, py, theta1, theta2 = x[:4]
         
         # Get positions
         positions = self.get_tractor_trailer_positions(x)
@@ -1242,10 +1297,16 @@ class TractorTrailer2d:
         transforms_tractor_wheels.append(
             Affine2D().rotate(theta1).translate(*positions['tractor_rear']) + plt.gca().transData
         )
-        # Tractor front wheel (with steering angle if u is provided)
+        # Tractor front wheel (with steering angle)
         # The wheel should rotate around its center at the front axle position
         steering_angle = 0.0
-        if u is not None:
+        
+        # Extract steering angle based on state dimensionality
+        if len(x) >= 6:
+            # 6D state (acceleration dynamics): delta is at index 5
+            steering_angle = x[5]
+        elif u is not None:
+            # 4D state (kinematic dynamics): delta from control input
             v, delta = u
             steering_angle = delta
         front_wheel_transform = (Affine2D()

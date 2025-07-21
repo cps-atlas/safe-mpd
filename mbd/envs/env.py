@@ -1,5 +1,6 @@
 import numpy as np
 import jax.numpy as jnp
+import logging
 
 """
 Created on June 11th, 2025
@@ -68,7 +69,8 @@ class Env:
     def set_obs_rectangle_parking(self):
         """Set rectangular obstacles for parking scenario"""
         obs_rectangle = [
-            [0.0, 13.0, 30.0, 2.0, 0.0]
+            [0.0, 14.0, 30.0, 1.0, 0.0],
+            [0.0, -13.0, 30.0, 1.0, 0.0]
         ]
         return obs_rectangle
     
@@ -193,7 +195,7 @@ class Env:
     def print_parking_layout(self):
         """Print the parking layout for visualization"""
         if self.case != "parking":
-            print("Parking layout only available for parking scenario")
+            logging.info("Parking layout only available for parking scenario")
             return
             
         config = self.parking_config
@@ -202,9 +204,9 @@ class Env:
         occupied = set(config['occupied_spaces'])
         target = config['target_spaces']
         
-        print("Parking Layout:")
-        print("O = Occupied, E = Empty, T = Target")
-        print("-" * (cols * 4 + 1))
+        logging.debug("Parking Layout:")
+        logging.debug("O = Occupied, E = Empty, T = Target")
+        logging.debug("-" * (cols * 4 + 1))
         
         for row in range(rows-1, -1, -1):  # Iterate rows in reverse order
             line = "|"
@@ -217,8 +219,8 @@ class Env:
                 else:
                     symbol = "E"
                 line += f" {symbol} |"
-            print(line)
-            print("-" * (cols * 4 + 1))
+            logging.debug(line)
+            logging.debug("-" * (cols * 4 + 1))
 
     def set_rectangle_obs(self, obstacles, coordinate_mode="left-top", padding=0.0):
         """
@@ -255,13 +257,13 @@ class Env:
                 raise ValueError(f"coordinate_mode must be 'left-top' or 'center', got {coordinate_mode}")
         
         self.obs_rectangle = np.array(converted_obstacles)
-        print(f"Set {len(converted_obstacles)} rectangular obstacles with {coordinate_mode} coordinates")
+        logging.debug(f"Set {len(converted_obstacles)} rectangular obstacles with {coordinate_mode} coordinates")
         return self.obs_rectangle
 
     def set_plot_limits(self, x_range, y_range):
         """Set custom plot limits for visualization"""
         self.x_range = x_range
         self.y_range = y_range
-        print(f"Plot limits set to x_range: {self.x_range}, y_range: {self.y_range}")
+        logging.debug(f"Plot limits set to x_range: {self.x_range}, y_range: {self.y_range}")
 
 
