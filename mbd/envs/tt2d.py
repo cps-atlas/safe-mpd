@@ -626,7 +626,7 @@ class TractorTrailer2d:
         trailer_pos = self.get_trailer_position(q)
         
         # Compute trailer goal position from goal state
-        trailer_goal = self.get_trailer_position(self.xg)
+        trailer_goal = self.get_trailer_position(self.xg[:4])
         
         trailer_dist = jnp.linalg.norm(trailer_pos - trailer_goal)
         trailer_reward = (
@@ -713,7 +713,7 @@ class TractorTrailer2d:
         trailer_pos = self.get_trailer_position(q)
         
         # Compute trailer goal position from goal state
-        trailer_goal = self.get_trailer_position(self.xg)
+        trailer_goal = self.get_trailer_position(self.xg[:4])
         
         # ---------------------------------------------------------------
         # 1. positional reward - use different position based on preference
@@ -763,7 +763,7 @@ class TractorTrailer2d:
     @partial(jax.jit, static_argnums=(0,))
     def get_trailer_position(self, x):
         """Get the trailer center position from state"""
-        px, py, theta1, theta2 = x
+        px, py, theta1, theta2 = x[:4]
         
         # Hitch point (at rear of tractor)
         hitch_x = px - self.lh * jnp.cos(theta1)
@@ -778,7 +778,7 @@ class TractorTrailer2d:
     @partial(jax.jit, static_argnums=(0,))
     def get_tractor_trailer_rectangles(self, x):
         """Get the corner points of tractor and trailer rectangles for collision checking"""
-        px, py, theta1, theta2 = x
+        px, py, theta1, theta2 = x[:4]
         
         # Tractor rectangle (centered at tractor center)
         tractor_center_x = px + (self.l1/2) * jnp.cos(theta1)
@@ -1213,7 +1213,7 @@ class TractorTrailer2d:
 
     def get_tractor_trailer_positions(self, x):
         """Calculate tractor and trailer positions and orientations"""
-        px, py, theta1, theta2 = x
+        px, py, theta1, theta2 = x[:4]
         
         # Tractor position (rear axle center)
         tractor_rear_x = px
@@ -1247,7 +1247,7 @@ class TractorTrailer2d:
 
     def render_rigid_body(self, x, u=None):
         """Return the transforms to render the tractor-trailer system"""
-        px, py, theta1, theta2 = x
+        px, py, theta1, theta2 = x[:4]
         
         # Get positions
         positions = self.get_tractor_trailer_positions(x)
@@ -1273,10 +1273,16 @@ class TractorTrailer2d:
         transforms_tractor_wheels.append(
             Affine2D().rotate(theta1).translate(*positions['tractor_rear']) + plt.gca().transData
         )
-        # Tractor front wheel (with steering angle if u is provided)
+        # Tractor front wheel (with steering angle)
         # The wheel should rotate around its center at the front axle position
         steering_angle = 0.0
-        if u is not None:
+        
+        # Extract steering angle based on state dimensionality
+        if len(x) >= 6:
+            # 6D state (acceleration dynamics): delta is at index 5
+            steering_angle = x[5]
+        elif u is not None:
+            # 4D state (kinematic dynamics): delta from control input
             v, delta = u
             steering_angle = delta
         front_wheel_transform = (Affine2D()

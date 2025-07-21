@@ -51,7 +51,7 @@ class MBDConfig:
     # exp
     seed: int = 0
     # env
-    env_name: str = "tt2d"  # "tt2d" for kinematic, "acc_tt2d" for acceleration
+    env_name: str = "acc_tt2d"  # "tt2d" for kinematic, "acc_tt2d" for acceleration
     case: str = "parking" # "parking" for parking scenario, "navigation" for navigation scenario
     # diffusion
     Nsample: int = 20000  # number of samples
@@ -78,7 +78,7 @@ class MBDConfig:
     v_max: float = 3.0  # velocity limit
     delta_max_deg: float = 55.0  # steering angle limit in degrees
     # acceleration control constraints (for acc_tt2d)
-    a_max: float = 2.0  # acceleration limit [m/s²]
+    a_max: float = 1.0  # acceleration limit [m/s²]
     omega_max: float = 1.0  # steering rate limit [rad/s]
     # reward thresholds
     reward_threshold: float = 25.0  # position error threshold for main reward function
