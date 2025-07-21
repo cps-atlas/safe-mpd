@@ -95,9 +95,9 @@ class MBDConfig:
     preference_penalty_weight: float = 0.5  # penalty weight for movement preference
     heading_reward_weight: float = 0.5  # (should be 0.5 always) weight for heading reward calculation
     # demonstration evaluation weights
-    ref_pos_weight: float = 0.3  # position weight in demo evaluation
-    ref_theta1_weight: float = 0.35  # theta1 weight in demo evaluation  
-    ref_theta2_weight: float = 0.35 # theta2 weight in demo evaluation
+    ref_pos_weight: float = 0.8  # position weight in demo evaluation
+    ref_theta1_weight: float = 0.1  # theta1 weight in demo evaluation  
+    ref_theta2_weight: float = 0.1 # theta2 weight in demo evaluation
     # animation
     render: bool = True
     save_animation: bool = False # flag to enable animation saving
