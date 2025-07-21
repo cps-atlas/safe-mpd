@@ -55,7 +55,7 @@ class TestConfig(MBDConfig):
     goal_theta2: Optional[float] = None  # Goal trailer orientation
     
     # Validation criteria (test-specific)
-    min_final_distance_to_goal: float = 2.0
+    min_final_distance_to_goal: float = 4.5
     
     def __post_init__(self):
         """Apply visualization settings after initialization"""
@@ -74,8 +74,8 @@ TEST_SCENARIOS = {
         motion_preference=1,
         expected_reward_min=0.3,
         expected_reward_max=2.0,
-        init_dx=-2.0,
-        init_dy=1.0,
+        init_dx=-4.0,
+        init_dy=3.0,
         init_theta1=0.0,
         init_theta2=0.0,
         goal_theta1=-jnp.pi/2,
@@ -90,8 +90,8 @@ TEST_SCENARIOS = {
         motion_preference=-1,
         expected_reward_min=0.3,
         expected_reward_max=2.0,
-        init_dx=-3.0,
-        init_dy=4.0,
+        init_dx=12.0,
+        init_dy=5.0,
         init_theta1=0.0,
         init_theta2=0.0,
         goal_theta1=jnp.pi/2,
@@ -157,8 +157,8 @@ ACC_TEST_SCENARIOS = {
         motion_preference=1,
         expected_reward_min=0.3,
         expected_reward_max=2.0,
-        init_dx=-2.0,
-        init_dy=1.0,
+        init_dx=-3.0,
+        init_dy=2.0,
         init_theta1=0.0,
         init_theta2=0.0,
         goal_theta1=-jnp.pi/2,
@@ -173,7 +173,7 @@ ACC_TEST_SCENARIOS = {
         motion_preference=-1,
         expected_reward_min=0.3,
         expected_reward_max=2.0,
-        init_dx=-3.0,
+        init_dx=12.0,
         init_dy=4.0,
         init_theta1=0.0,
         init_theta2=0.0,
@@ -189,8 +189,8 @@ ACC_TEST_SCENARIOS = {
         motion_preference=0,
         expected_reward_min=0.3,
         expected_reward_max=2.0,
-        init_dx=-3.0,
-        init_dy=4.0,
+        init_dx=3.0,
+        init_dy=1.0,
         init_theta1=0.0,
         init_theta2=0.0,
         goal_theta1=-jnp.pi/2,

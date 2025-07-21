@@ -191,7 +191,7 @@ class TestMBDPlanner(BaseMBDTest):
         print(f"Scenario pairs: {scenario_pairs}")
         
         # Check that we have the expected number of scenarios
-        self.assertEqual(len(default_scenarios), 10)  # 5 kinematic + 5 acceleration base scenarios
+        self.assertEqual(len(default_scenarios), 10)  # 5 kinematic + 5 acceleration base scenarios (no demo)
         self.assertEqual(len(demo_scenarios), 10)  # 5 kinematic + 5 acceleration demo versions
         self.assertEqual(len(kinematic_scenarios), 10)  # 5 base + 5 demo kinematic scenarios
         self.assertEqual(len(acceleration_scenarios), 10)  # 5 base + 5 demo acceleration scenarios

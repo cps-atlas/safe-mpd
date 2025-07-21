@@ -79,7 +79,8 @@ def run_default_tests(visualize: bool = False):
     """Run all default tests (no demonstration)."""
     print("Running all default tests (no demonstration)...")
     
-    default_scenarios = list_default_scenarios()
+    # Only include non-demo scenarios
+    default_scenarios = [name for name in list_default_scenarios() if not name.endswith("_demo")]
     test_methods = [f"test_{scenario}" for scenario in default_scenarios]
     
     suite = unittest.TestSuite()
@@ -112,10 +113,11 @@ def run_demo_tests(visualize: bool = False):
 
 
 def run_acceleration_tests(visualize: bool = False):
-    """Run all acceleration dynamics tests (default + demo)."""
-    print("Running all acceleration dynamics tests (default + demo)...")
+    """Run acceleration dynamics tests (no demonstration unless --demo specified)."""
+    print("Running acceleration dynamics tests (no demonstration)...")
     
-    acc_scenarios = list_acceleration_scenarios()
+    # Only include non-demo acceleration scenarios
+    acc_scenarios = [name for name in list_acceleration_scenarios() if not name.endswith("_demo")]
     test_methods = [f"test_{scenario}" for scenario in acc_scenarios]
     
     suite = unittest.TestSuite()
@@ -130,10 +132,11 @@ def run_acceleration_tests(visualize: bool = False):
 
 
 def run_kinematic_tests(visualize: bool = False):
-    """Run all kinematic dynamics tests (default + demo)."""
-    print("Running all kinematic dynamics tests (default + demo)...")
+    """Run kinematic dynamics tests (no demonstration unless --demo specified)."""
+    print("Running kinematic dynamics tests (no demonstration)...")
     
-    kinematic_scenarios = list_kinematic_scenarios()
+    # Only include non-demo kinematic scenarios
+    kinematic_scenarios = [name for name in list_kinematic_scenarios() if not name.endswith("_demo")]
     test_methods = [f"test_{scenario}" for scenario in kinematic_scenarios]
     
     suite = unittest.TestSuite()

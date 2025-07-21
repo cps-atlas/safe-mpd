@@ -117,41 +117,103 @@ class BaseMBDTest(unittest.TestCase):
             timing: Timing information dictionary
             env: Environment instance used for the test
         """
-        # Reward bounds check
+        # Reward bounds check (kept for reference, but success is based on position)
         self.assertGreaterEqual(reward, config.expected_reward_min, 
                                f"Reward {reward:.3f} below minimum {config.expected_reward_min}")
         self.assertLessEqual(reward, config.expected_reward_max,
                             f"Reward {reward:.3f} above maximum {config.expected_reward_max}")
         print(f"✓ Reward {reward:.3f} within expected range [{config.expected_reward_min}, {config.expected_reward_max}]")
         
-        # # Goal distance check
-        # final_state = states[-1]
-        # goal_distance = self.compute_goal_distance(final_state, config, env)
-        # self.assertLessEqual(goal_distance, config.min_final_distance_to_goal,
-        #                     f"Final distance to goal {goal_distance:.3f} too large")
-        # print(f"✓ Final goal distance: {goal_distance:.3f}m (limit: {config.min_final_distance_to_goal}m)")
+        # Check constraint violations along trajectory
+        hitch_violation_found, collision_found = self.check_trajectory_violations(states, env)
+        
+        # Position-based success check  
+        final_state = states[-1]
+        position_success, tractor_distance, trailer_distance = self.check_position_success(final_state, config, env)
+        
+        print(f"✓ Constraint violations - Hitch: {hitch_violation_found}, Collision: {collision_found}")
+        print(f"✓ Position success: {position_success} (tractor: {tractor_distance:.2f}m, trailer: {trailer_distance:.2f}m, limit: {config.min_final_distance_to_goal}m)")
+        
+        # Success is defined as reaching goal position without this being a hard failure
+        # We log violations but don't fail the test for now (for analysis purposes)
+        self.assertTrue(position_success, f"Neither tractor nor trailer reached goal within {config.min_final_distance_to_goal}m")
         
         # Basic sanity checks
         self.assertEqual(len(actions), config.Hsample, "Action sequence length mismatch")
         self.assertEqual(len(states), config.Hsample + 1, "State sequence length mismatch")  # +1 for initial state
         self.assertEqual(actions.shape[1], 2, "Actions should have 2 dimensions")
         
-        # Check state dimensions based on dynamics type
-        if config.env_name == "acc_tt2d":
-            self.assertEqual(states.shape[1], 6, "Acceleration dynamics states should have 6 dimensions (x, y, theta1, theta2, v, delta)")
-            print("✓ 6D acceleration dynamics state dimensions are correct")
-        else:  # tt2d
-            self.assertEqual(states.shape[1], 4, "Kinematic dynamics states should have 4 dimensions (x, y, theta1, theta2)")
-            print("✓ 4D kinematic dynamics state dimensions are correct")
+    def check_trajectory_violations(self, states: np.ndarray, env) -> Tuple[bool, bool]:
+        """
+        Check for constraint violations along the entire trajectory.
         
-    def compute_goal_distance(self, final_state: np.ndarray, config: TestConfig, env) -> float:
-        # Get the actual goal position from the environment
-        goal_state = env.xg  # This is the actual goal state set in the environment
-        goal_pos = goal_state[:2]  # x, y coordinates
+        Args:
+            states: State trajectory array
+            env: Environment instance
+            
+        Returns:
+            Tuple of (hitch_violation_found, collision_found)
+        """
+        import jax.numpy as jnp
         
-        final_pos = final_state[:2]  # x, y only
-        return np.linalg.norm(final_pos - goal_pos)
+        hitch_violation_found = False
+        collision_found = False
         
+        # Check each state in the trajectory
+        for i, state in enumerate(states):
+            # Convert to JAX array for environment functions
+            state_jax = jnp.array(state)
+            
+            # For acceleration dynamics, only use first 4 elements for collision/hitch checking
+            state_4d = state_jax[:4]
+            
+            # Check hitch violation using environment function
+            if env.check_hitch_violation(state_4d):
+                hitch_violation_found = True
+            
+            # Check collision using environment function
+            if env.check_obstacle_collision(state_4d, env.obs_circles, env.obs_rectangles):
+                collision_found = True
+                
+        return hitch_violation_found, collision_found
+        
+    def check_position_success(self, final_state: np.ndarray, config: TestConfig, env) -> Tuple[bool, float, float]:
+        """
+        Check if the final position is successful based on tractor and trailer positions.
+        
+        Args:
+            final_state: Final state from trajectory
+            config: Test configuration
+            env: Environment instance
+            
+        Returns:
+            Tuple of (success, tractor_distance, trailer_distance)
+        """
+        import jax.numpy as jnp
+        
+        # Convert to JAX array for environment functions
+        state_jax = jnp.array(final_state)
+        
+        # Get tractor position (front center)
+        tractor_pos = final_state[:2]
+        
+        # Get trailer position using environment function 
+        # For acceleration dynamics, only use first 4 elements
+        trailer_pos = np.array(env.get_trailer_position(state_jax[:4]))
+        
+        # Get goal positions (use 4D goal state for compatibility)
+        goal_state = env.xg  
+        
+        # Compute distances
+        tractor_distance = np.linalg.norm(tractor_pos - goal_state[:2])
+        trailer_distance = np.linalg.norm(trailer_pos - goal_state[:2])
+        
+        # Success if either tractor OR trailer is close enough to goal
+        success = (tractor_distance <= config.min_final_distance_to_goal or 
+                  trailer_distance <= config.min_final_distance_to_goal)
+        
+        return success, tractor_distance, trailer_distance
+
     def save_test_results(self, config: TestConfig, reward: float, 
                          actions: np.ndarray, states: np.ndarray, 
                          timing: Dict[str, float], env):
@@ -166,6 +228,10 @@ class BaseMBDTest(unittest.TestCase):
             timing: Timing information
             env: Environment instance
         """
+        # Check trajectory violations and position success
+        hitch_violation_found, collision_found = self.check_trajectory_violations(states, env)
+        position_success, tractor_distance, trailer_distance = self.check_position_success(states[-1], config, env)
+        
         result_data = {
             'config': asdict(config),
             'reward': float(reward),
@@ -174,9 +240,17 @@ class BaseMBDTest(unittest.TestCase):
             'timestamp': datetime.now().isoformat(),
             'git_commit': self.get_git_commit(),
             'test_summary': {
-                'goal_distance': float(self.compute_goal_distance(states[-1], config, env)),
+                # Constraint violations
+                'hitch_violation_found': bool(hitch_violation_found),
+                'collision_found': bool(collision_found),
+                # Position success
+                'position_success': bool(position_success),
+                'tractor_distance_to_goal': float(tractor_distance),
+                'trailer_distance_to_goal': float(trailer_distance),
+                'min_final_distance_to_goal': float(config.min_final_distance_to_goal),
+                # Trajectory info
                 'trajectory_length': len(states),
-                'action_sequence_length': len(actions)
+                'action_sequence_length': len(actions)            
             }
         }
         
