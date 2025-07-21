@@ -31,6 +31,12 @@ class AccTractorTrailer2d(TractorTrailer2d):
         # Initialize parent class
         super().__init__(**kwargs)
         
+        # Pre-compute constants for JIT optimization
+        # Use larger time step for predictive rollout to reduce computation
+        self._rollout_dt = 1.0  # seconds - larger dt for rollout prediction only
+        self._v_threshold = 0.5  # velocity threshold for rollout decision
+        self._max_rollout_steps = int(2.0 * (self.v_max-self._v_threshold) / (self.a_max * self._rollout_dt))
+        
         # Override initial state to include v and delta (initialized to zero)
         if hasattr(self, 'x0'):
             # Extend existing x0 with v=0, delta=0
@@ -68,6 +74,7 @@ class AccTractorTrailer2d(TractorTrailer2d):
         # Extend to 6D state with goal v and delta
         self.xg = jnp.concatenate([self.xg, jnp.array([v, delta])])
 
+    @partial(jax.jit, static_argnums=(0,))
     def reset(self, rng: jax.Array):
         """Resets the environment to an initial state."""
         return State(self.x0, self.x0, 0.0, 0.0)
@@ -154,60 +161,15 @@ class AccTractorTrailer2d(TractorTrailer2d):
         
         # Step 2: Check if we need additional rollout for safety checking
         v_new = q_new[4]
-        v_threshold = 0.1
-        
-        def check_safety_single_step():
-            """Check safety for just the single step case"""
-            obstacle_collision = self.check_obstacle_collision(q_new[:4], self.obs_circles, self.obs_rectangles)
-            hitch_violation = self.check_hitch_violation(q_new[:4])
-            return obstacle_collision, hitch_violation
-        
-        def check_safety_with_rollout():
-            """Check safety during rollout until stop (for safety prediction)"""
-            # Check safety of q_new first
-            obstacle_collision_new = self.check_obstacle_collision(q_new[:4], self.obs_circles, self.obs_rectangles)
-            hitch_violation_new = self.check_hitch_violation(q_new[:4])
-            
-            # Determine deceleration direction from q_new
-            decel_sign = jnp.where(v_new > 0, -1.0, jnp.where(v_new < 0, 1.0, 0.0))
-            u_stop = jnp.array([decel_sign * self.a_max, 0.0])
-            
-            def rollout_step(carry, _):
-                q_curr, stopped, obs_collision_any, hitch_violation_any = carry
-                v_curr = q_curr[4]
-                
-                # Continue rollout if not stopped
-                should_continue = jnp.abs(v_curr) > v_threshold
-                q_next = jnp.where(should_continue, rk4(self.tractor_trailer_dynamics, q_curr, u_stop, self.dt), q_curr)
-                
-                # Check safety at this step
-                obs_collision_step = self.check_obstacle_collision(q_next[:4], self.obs_circles, self.obs_rectangles)
-                hitch_violation_step = self.check_hitch_violation(q_next[:4])
-                
-                # Accumulate any violations found during rollout
-                obs_collision_any = obs_collision_any | obs_collision_step
-                hitch_violation_any = hitch_violation_any | hitch_violation_step
-                
-                # Update stopped flag
-                stopped_next = stopped | (jnp.abs(q_next[4]) <= v_threshold)
-                
-                return (q_next, stopped_next, obs_collision_any, hitch_violation_any), None
-            
-            # Run rollout with maximum steps
-            max_steps = int(2.0 * self.v_max / (self.a_max * self.dt)) 
-            init_carry = (q_new, False, obstacle_collision_new, hitch_violation_new)
-            (q_final, _, obstacle_collision_any, hitch_violation_any), _ = jax.lax.scan(
-                rollout_step, init_carry, None, length=max_steps
-            )
-            
-            return obstacle_collision_any, hitch_violation_any
         
         # Choose safety checking strategy based on velocity
+        # For very low velocities, use simple single-step check
+        # For higher velocities, use predictive rollout checking
         obstacle_collision, hitch_violation = jax.lax.cond(
-            jnp.abs(v_new) <= v_threshold,
-            lambda _: check_safety_single_step(),
-            lambda _: check_safety_with_rollout(),
-            None
+            jnp.abs(v_new) <= self._v_threshold,
+            self._check_safety_single_step,
+            self._check_safety_with_rollout,
+            (q_new, v_new)
         )
         
         # Step 4: Return q_new if safe, otherwise stick to previous q
@@ -216,6 +178,58 @@ class AccTractorTrailer2d(TractorTrailer2d):
         q_final = jnp.where(self.enable_hitch_projection & hitch_violation, q, q_gated)
         
         return q_final, obstacle_collision, hitch_violation
+
+    @partial(jax.jit, static_argnums=(0,))
+    def _check_safety_single_step(self, data):
+        """Check safety for just the single step case"""
+        q_new, v_new = data
+        obstacle_collision = self.check_obstacle_collision(q_new[:4], self.obs_circles, self.obs_rectangles)
+        hitch_violation = self.check_hitch_violation(q_new[:4])
+        return obstacle_collision, hitch_violation
+
+    @partial(jax.jit, static_argnums=(0,))
+    def _rollout_step(self, carry, _):
+        """Single step of the rollout-to-stop process (JIT-optimized)"""
+        q_curr, stopped, obs_collision_any, hitch_violation_any, u_stop = carry
+        v_curr = q_curr[4]
+        
+        # Continue rollout if not stopped
+        should_continue = jnp.abs(v_curr) > self._v_threshold
+        q_next = jnp.where(should_continue, rk4(self.tractor_trailer_dynamics, q_curr, u_stop, self._rollout_dt), q_curr)
+        
+        # Check safety at this step
+        obs_collision_step = self.check_obstacle_collision(q_next[:4], self.obs_circles, self.obs_rectangles)
+        hitch_violation_step = self.check_hitch_violation(q_next[:4])
+        
+        # Accumulate any violations found during rollout
+        obs_collision_any = obs_collision_any | obs_collision_step
+        hitch_violation_any = hitch_violation_any | hitch_violation_step
+        
+        # Update stopped flag (using same threshold as rollout decision)
+        stopped_next = stopped | (jnp.abs(q_next[4]) <= self._v_threshold)
+        
+        return (q_next, stopped_next, obs_collision_any, hitch_violation_any, u_stop), None
+
+    @partial(jax.jit, static_argnums=(0,))
+    def _check_safety_with_rollout(self, data):
+        """Check safety during rollout until stop (for safety prediction)"""
+        q_new, v_new = data
+        
+        # Check safety of q_new first
+        obstacle_collision_new = self.check_obstacle_collision(q_new[:4], self.obs_circles, self.obs_rectangles)
+        hitch_violation_new = self.check_hitch_violation(q_new[:4])
+        
+        # Determine deceleration direction from q_new
+        decel_sign = jnp.where(v_new > 0, -1.0, jnp.where(v_new < 0, 1.0, 0.0))
+        u_stop = jnp.array([decel_sign * self.a_max, 0.0])
+        
+        # Run rollout with pre-computed maximum steps using JIT-optimized rollout step
+        init_carry = (q_new, False, obstacle_collision_new, hitch_violation_new, u_stop)
+        (q_final, _, obstacle_collision_any, hitch_violation_any, _), _ = jax.lax.scan(
+            self._rollout_step, init_carry, None, length=self._max_rollout_steps
+        )
+        
+        return obstacle_collision_any, hitch_violation_any
 
     def get_preference_penalty(self, x, u):
         """
