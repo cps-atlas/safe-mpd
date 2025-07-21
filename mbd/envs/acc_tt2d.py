@@ -125,22 +125,49 @@ class AccTractorTrailer2d(TractorTrailer2d):
         
         q = state.pipeline_state
         
-        # Use gated rollout for acceleration dynamics
-        q_new, obstacle_collision, hitch_violation = self.gated_rollout(q, u_scaled)
+        # Conditionally use gated rollout or simple forward step based on configuration
+        use_gated_rollout = self.enable_gated_rollout_collision | self.enable_gated_rollout_hitch
         
-        # Compute reward: normal reward if no collision/violation, penalty if collision/hitch violation
-        reward = self.get_reward(q_new[:4])  # Use only position/angle states for reward
+        q_final, obstacle_collision, hitch_violation = jax.lax.cond(
+            use_gated_rollout,
+            self._step_with_gated_rollout,
+            self._step_without_gated_rollout,
+            (q, u_scaled)
+        )
         
-        # Apply penalties using flags returned from gated_rollout (no recomputation needed)
+        # Compute reward using only position/angle states
+        reward = self.get_reward(q_final[:4])
+        
+        # Apply penalties using flags (only if violations were checked)
         reward = jnp.where(obstacle_collision, reward - self.collision_penalty, reward)
         reward = jnp.where(hitch_violation, reward - self.hitch_penalty, reward)
         
         # Add preference penalty based on motion direction (use state velocity)
-        preference_penalty = self.get_preference_penalty(q_new, u_scaled)
+        preference_penalty = self.get_preference_penalty(q_final, u_scaled)
         has_preference = self.motion_preference != 0
         reward = jnp.where(has_preference, reward - preference_penalty, reward)
         
-        return state.replace(pipeline_state=q_new, obs=q_new, reward=reward, done=0.0)
+        return state.replace(pipeline_state=q_final, obs=q_final, reward=reward, done=0.0)
+
+    @partial(jax.jit, static_argnums=(0,))
+    def _step_with_gated_rollout(self, data):
+        """Step function with gated rollout enabled"""
+        q, u_scaled = data
+        return self.gated_rollout(q, u_scaled)
+    
+    @partial(jax.jit, static_argnums=(0,))
+    def _step_without_gated_rollout(self, data):
+        """Step function with simple forward dynamics (no gated rollout)"""
+        q, u_scaled = data
+        
+        # Simple forward propagate one step
+        q_new = rk4(self.tractor_trailer_dynamics, q, u_scaled, self.dt)
+        
+        # Check collision and hitch violations on q_new (for penalty computation)
+        obstacle_collision = self.check_obstacle_collision(q_new[:4], self.obs_circles, self.obs_rectangles)
+        hitch_violation = self.check_hitch_violation(q_new[:4])
+        
+        return q_new, obstacle_collision, hitch_violation
 
     @partial(jax.jit, static_argnums=(0,))
     def gated_rollout(self, q, u):
@@ -174,8 +201,8 @@ class AccTractorTrailer2d(TractorTrailer2d):
         
         # Step 4: Return q_new if safe, otherwise stick to previous q
         # Apply projections based on settings
-        q_gated = jnp.where(self.enable_collision_projection & obstacle_collision, q, q_new)
-        q_final = jnp.where(self.enable_hitch_projection & hitch_violation, q, q_gated)
+        q_gated = jnp.where(self.enable_gated_rollout_collision & obstacle_collision, q, q_new)
+        q_final = jnp.where(self.enable_gated_rollout_hitch & hitch_violation, q, q_gated)
         
         return q_final, obstacle_collision, hitch_violation
 

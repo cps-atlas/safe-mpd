@@ -65,9 +65,9 @@ class MBDConfig:
     motion_preference: int = 0  # 0=none, 1=forward, -1=backward
     # collision handling
     collision_penalty: float = 0.15  # penalty applied for obstacle collisions
-    enable_collision_projection: bool = True  # whether to project state back on obstacle collision
+    enable_gated_rollout_collision: bool = True  # whether to use gated rollout for obstacle collision
     hitch_penalty: float = 0.10  # penalty applied for hitch angle violations
-    enable_hitch_projection: bool = True  # whether to project state back on hitch violation
+    enable_gated_rollout_hitch: bool = True  # whether to use gated rollout for hitch violation
     # physical parameters
     l1: float = 3.23  # tractor wheelbase
     l2: float = 2.9   # trailer length
@@ -133,9 +133,9 @@ def dict_to_config_obj(config_dict):
         enable_demo=bool(config_dict["enable_demo"]),
         motion_preference=int(config_dict.get("motion_preference", 0)),
         collision_penalty=float(config_dict.get("collision_penalty", 0.15)),
-        enable_collision_projection=bool(config_dict.get("enable_collision_projection", True)),
+        enable_gated_rollout_collision=bool(config_dict.get("enable_gated_rollout_collision", True)),
         hitch_penalty=float(config_dict.get("hitch_penalty", 0.10)),
-        enable_hitch_projection=bool(config_dict.get("enable_hitch_projection", True)),
+        enable_gated_rollout_hitch=bool(config_dict.get("enable_gated_rollout_hitch", True)),
         reward_threshold=float(config_dict.get("reward_threshold", 25.0)),
         ref_reward_threshold=float(config_dict.get("ref_reward_threshold", 5.0)),
         max_w_theta=float(config_dict.get("max_w_theta", 0.75)),
@@ -647,9 +647,9 @@ if __name__ == "__main__":
         H=config.Hsample,
         motion_preference=config.motion_preference,
         collision_penalty=config.collision_penalty,
-        enable_collision_projection=config.enable_collision_projection,
+        enable_gated_rollout_collision=config.enable_gated_rollout_collision,
         hitch_penalty=config.hitch_penalty,
-        enable_hitch_projection=config.enable_hitch_projection,
+        enable_gated_rollout_hitch=config.enable_gated_rollout_hitch,
         reward_threshold=config.reward_threshold,
         ref_reward_threshold=config.ref_reward_threshold,
         max_w_theta=config.max_w_theta,
