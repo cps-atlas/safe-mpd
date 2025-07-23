@@ -3,7 +3,7 @@ from .tt2d import TractorTrailer2d
 from .acc_tt2d import AccTractorTrailer2d
 
 def get_env(env_name: str, case: str = "parking", dt=0.2, H=50, motion_preference=0, 
-            collision_penalty=0.15, enable_gated_rollout_collision=False, hitch_penalty=0.10, 
+            collision_penalty=0.15, enable_gated_rollout_collision=True, hitch_penalty=0.10, 
             enable_gated_rollout_hitch=True, reward_threshold=25.0, ref_reward_threshold=5.0,
             max_w_theta=0.75, hitch_angle_weight=0.2, l1=3.23, l2=2.9, lh=1.15, 
             tractor_width=2.0, trailer_width=2.5, v_max=3.0, delta_max_deg=55.0,

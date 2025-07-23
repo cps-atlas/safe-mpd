@@ -65,9 +65,9 @@ class MBDConfig:
     motion_preference: int = 0  # 0=none, 1=forward, -1=backward
     # collision handling
     collision_penalty: float = 0.15  # penalty applied for obstacle collisions
-    enable_gated_rollout_collision: bool = True  # whether to use gated rollout for obstacle collision
+    enable_gated_rollout_collision: bool = False  # whether to use gated rollout for obstacle collision
     hitch_penalty: float = 0.10  # penalty applied for hitch angle violations
-    enable_gated_rollout_hitch: bool = True  # whether to use gated rollout for hitch violation
+    enable_gated_rollout_hitch: bool = False  # whether to use gated rollout for hitch violation
     # physical parameters
     l1: float = 3.23  # tractor wheelbase
     l2: float = 2.9   # trailer length
