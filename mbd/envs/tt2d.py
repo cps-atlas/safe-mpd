@@ -43,7 +43,7 @@ class TractorTrailer2d:
     """
     def __init__(self, x0=None, xg=None, env_config=None, case="parking", dt=0.2, H=50, motion_preference=0, 
                  collision_penalty=0.15, enable_gated_rollout_collision=False, hitch_penalty=0.10, 
-                 enable_gated_rollout_hitch=True, reward_threshold=25.0, ref_reward_threshold=5.0,
+                 enable_gated_rollout_hitch=True, enable_projection=False, reward_threshold=25.0, ref_reward_threshold=5.0,
                  max_w_theta=0.75, hitch_angle_weight=0.2, l1=3.23, l2=2.9, lh=1.15, 
                  tractor_width=2.0, trailer_width=2.5, v_max=3.0, delta_max_deg=55.0,
                  d_thr_factor=1.0, k_switch=2.5, steering_weight=0.05, preference_penalty_weight=0.05,
@@ -60,6 +60,7 @@ class TractorTrailer2d:
         self.enable_gated_rollout_collision = enable_gated_rollout_collision
         self.hitch_penalty = hitch_penalty
         self.enable_gated_rollout_hitch = enable_gated_rollout_hitch
+        self.enable_projection = enable_projection
         
         # Reward thresholds
         self.reward_threshold = reward_threshold
@@ -149,6 +150,15 @@ class TractorTrailer2d:
         if hasattr(self.env, 'print_parking_layout'):
             self.env.print_parking_layout()
         
+        # Set up Lagrangian-based projection solver parameters
+        if self.enable_projection:
+            # Lagrangian solver parameters (more conservative for numerical stability)
+            self._lagrangian_penalty = 10.0   # penalty parameter ρ (reduced from 1000)
+            self._lagrangian_max_iters = 5    # outer iterations for multiplier updates
+            self._lagrangian_inner_iters = 20 # inner iterations for x optimization  
+            self._lagrangian_step_size = 0.001 # gradient descent step size (reduced from 0.01)
+            self._max_grad_norm = 10.0         # gradient clipping threshold
+
     def set_init_pos(self, x=None, y=None, dx=None, dy=None, theta1=0.0, theta2=0.0):
         """
         Set initial position for tractor-trailer.
@@ -274,14 +284,36 @@ class TractorTrailer2d:
         
         q = state.pipeline_state
         
-        # Conditionally use gated rollout or simple forward step based on configuration
+        # Propose next state via RK4
+        q_proposed = rk4(self.tractor_trailer_dynamics, q, u_scaled, self.dt)
+        
+        # Choose between three methods: projection, gated rollout, or naive penalty
+        def use_projection_fn(args):
+            q_prop, = args
+            q_safe = self.project_to_safe_set(q_prop)
+            return q_safe, False, False  # No penalties since guaranteed safe
+        
+        def use_gated_rollout_fn(args):
+            q_prop, = args
+            return self._step_with_gated_rollout((q, q_prop))
+        
+        def use_naive_penalty_fn(args):
+            q_prop, = args
+            return self._step_without_gated_rollout(q_prop)
+        
+        # Select method based on flags (three equal options)
         use_gated_rollout = self.enable_gated_rollout_collision | self.enable_gated_rollout_hitch
         
         q_final, obstacle_collision, hitch_violation = jax.lax.cond(
-            use_gated_rollout,
-            self._step_with_gated_rollout,
-            self._step_without_gated_rollout,
-            (q, u_scaled)
+            self.enable_projection,
+            use_projection_fn,
+            lambda args: jax.lax.cond(
+                use_gated_rollout,
+                use_gated_rollout_fn,
+                use_naive_penalty_fn,
+                args
+            ),
+            (q_proposed,)
         )
         
         # Compute reward
@@ -301,33 +333,25 @@ class TractorTrailer2d:
     @partial(jax.jit, static_argnums=(0,))
     def _step_with_gated_rollout(self, data):
         """Step function with gated rollout enabled"""
-        q, u_scaled = data
-        return self.gated_rollout(q, u_scaled)
+        q, q_proposed = data
+        return self.gated_rollout(q, q_proposed)
     
     @partial(jax.jit, static_argnums=(0,))
-    def _step_without_gated_rollout(self, data):
+    def _step_without_gated_rollout(self, q_proposed):
         """Step function with simple forward dynamics (no gated rollout)"""
-        q, u_scaled = data
+        # Check collision and hitch violations on q_proposed (for penalty computation)
+        obstacle_collision = self.check_obstacle_collision(q_proposed, self.obs_circles, self.obs_rectangles)
+        hitch_violation = self.check_hitch_violation(q_proposed)
         
-        # Simple forward propagate one step
-        q_new = rk4(self.tractor_trailer_dynamics, q, u_scaled, self.dt)
-        
-        # Check collision and hitch violations on q_new (for penalty computation)
-        obstacle_collision = self.check_obstacle_collision(q_new, self.obs_circles, self.obs_rectangles)
-        hitch_violation = self.check_hitch_violation(q_new)
-        
-        return q_new, obstacle_collision, hitch_violation
+        return q_proposed, obstacle_collision, hitch_violation
 
     @partial(jax.jit, static_argnums=(0,))
-    def gated_rollout(self, q, u):
+    def gated_rollout(self, q, q_proposed):
         """
         Gated rollout for kinematic dynamics.
         This extracts the existing safety logic into a reusable function.
         Returns both final state and collision/violation flags to avoid recomputation.
         """
-        # Forward propagate one step
-        q_proposed = rk4(self.tractor_trailer_dynamics, q, u, self.dt)
-        
         # Check obstacle collision and hitch angle violation separately
         obstacle_collision = self.check_obstacle_collision(q_proposed, self.obs_circles, self.obs_rectangles)
         hitch_violation = self.check_hitch_violation(q_proposed)
@@ -1003,6 +1027,258 @@ class TractorTrailer2d:
         obstacle_collision = self.check_obstacle_collision(x, obs_circles, obs_rectangles)
         hitch_violation = self.check_hitch_violation(x)
         return obstacle_collision | hitch_violation
+
+    # ================================================================
+    # PROJECTION-RELATED FUNCTIONS
+    # ================================================================
+
+    @partial(jax.jit, static_argnums=(0,))
+    def _sdf_oriented_box(self, point, center, half_size, angle):
+        """
+        Signed distance from `point` to an oriented rectangle:
+          half_size = [half_length, half_width]
+          angle ∈ ℝ is the box's rotation about its center.
+        Positive outside, negative inside.
+        """
+        # box axes
+        u = jnp.array([jnp.cos(angle),  jnp.sin(angle)])
+        v = jnp.array([-jnp.sin(angle), jnp.cos(angle)])
+        # vector from box center to query point
+        d = jnp.stack([jnp.dot(point - center, u),
+                       jnp.dot(point - center, v)])
+        # how far outside along each local axis
+        q = jnp.abs(d) - half_size
+        # outside term: Euclidean norm of positive parts
+        outside = jnp.linalg.norm(jnp.maximum(q, 0.0))
+        # inside term: max of the two inside distances (≤0)
+        inside = jnp.minimum(jnp.maximum(q[0], q[1]), 0.0)
+        return outside + inside
+
+    @partial(jax.jit, static_argnums=(0,))
+    def _signed_dist_rect_circle(self, x, circle):
+        """
+        Returns signed distance between the *union* of tractor+trailer
+        rectangles at state x, and a circle obstacle.
+        circle = [cx, cy, radius].
+        """
+        geom = self.get_tractor_trailer_rectangles(x)
+        center_c, r = circle[:2], circle[2]
+
+        # tractor SDF
+        hd_trac = jnp.array([self.l1/2, self.tractor_width/2])
+        dt = self._sdf_oriented_box(center_c,
+                               geom['tractor_center'],
+                               hd_trac,
+                               geom['tractor_angle'])
+        # trailer SDF
+        hd_tral = jnp.array([self.l2/2, self.trailer_width/2])
+        dtr = self._sdf_oriented_box(center_c,
+                                geom['trailer_center'],
+                                hd_tral,
+                                geom['trailer_angle'])
+        # subtract circle radius, then take the tighter (minimum)
+        return jnp.minimum(dt, dtr) - r
+
+    @partial(jax.jit, static_argnums=(0,))
+    def _sdf_two_boxes(self, c1, h1, a1, c2, h2, a2):
+        """
+        Signed distance between two oriented boxes A and B:
+        c1,h1,a1 = center, half‐sizes, angle of box A
+        c2,h2,a2 = same for box B.
+        """
+        # box axes
+        u1 = jnp.array([jnp.cos(a1),  jnp.sin(a1)])
+        v1 = jnp.array([-jnp.sin(a1), jnp.cos(a1)])
+        u2 = jnp.array([jnp.cos(a2),  jnp.sin(a2)])
+        v2 = jnp.array([-jnp.sin(a2), jnp.cos(a2)])
+        axes = [u1, v1, u2, v2]
+
+        def gap_on_axis(axis):
+            # projection centers
+            p1 = jnp.dot(c1, axis)
+            p2 = jnp.dot(c2, axis)
+            # projection radii
+            r1 = h1[0]*jnp.abs(jnp.dot(u1, axis)) + h1[1]*jnp.abs(jnp.dot(v1, axis))
+            r2 = h2[0]*jnp.abs(jnp.dot(u2, axis)) + h2[1]*jnp.abs(jnp.dot(v2, axis))
+            # signed gap: positive if disjoint, negative if overlapping
+            return jnp.maximum((p2 - r2) - (p1 + r1),
+                               (p1 - r1) - (p2 + r2))
+
+        # take the worst (largest) gap over all separating axes
+        gaps = jnp.stack([gap_on_axis(a) for a in axes])
+        return jnp.max(gaps)
+
+    @partial(jax.jit, static_argnums=(0,))
+    def _signed_dist_rect_rect(self, x, rect_obs):
+        """
+        Signed distance between the *union* of tractor+trailer
+        and a single rectangular obstacle.
+        rect_obs = [ox, oy, width, height, angle].
+        """
+        ox, oy, w, h, oa = rect_obs
+        c_obs  = jnp.array([ox, oy])
+        hs_obs = jnp.array([w/2, h/2])
+
+        geom = self.get_tractor_trailer_rectangles(x)
+        # tractor
+        c_t, ht, at = geom['tractor_center'], jnp.array([self.l1/2, self.tractor_width/2]), geom['tractor_angle']
+        d1 = self._sdf_two_boxes(c_t, ht, at, c_obs, hs_obs, oa)
+        # trailer
+        c_r, hr, ar = geom['trailer_center'], jnp.array([self.l2/2, self.trailer_width/2]), geom['trailer_angle']
+        d2 = self._sdf_two_boxes(c_r, hr, ar, c_obs, hs_obs, oa)
+
+        return jnp.minimum(d1, d2)
+
+    @partial(jax.jit, static_argnums=(0,))
+    def _projection_constraints(self, x):
+        """Returns inequality constraints c_i(x) >= 0 for safe set"""
+        cs = []
+        
+        # Only use first few circular obstacles (most critical ones)
+        if self.obs_circles.shape[0] > 0:
+            for i in range(self.obs_circles.shape[0]):
+                circle = self.obs_circles[i]
+                d = self._signed_dist_rect_circle(x, circle)
+                # Simple finite check
+                d = jnp.where(jnp.isfinite(d), d, 100.0)
+                cs.append(d)
+        
+        # Use all rectangular obstacles (usually few)
+        if self.obs_rectangles.shape[0] > 0:
+            for i in range(self.obs_rectangles.shape[0]):
+                rect = self.obs_rectangles[i]
+                d = self._signed_dist_rect_rect(x, rect)
+                # Simple finite check
+                d = jnp.where(jnp.isfinite(d), d, 100.0)
+                cs.append(d)
+        
+        # Hitch angle constraint (simplified)
+        wrap_pi = lambda a: (a + jnp.pi) % (2*jnp.pi) - jnp.pi
+        hitch_angle = wrap_pi(x[2] - x[3])
+        hitch_constraint = self.phi_max - jnp.abs(hitch_angle)
+        cs.append(hitch_constraint)
+        
+        # Simple array creation
+        if len(cs) == 0:
+            return jnp.array([1.0])  # No constraints means always safe
+        else:
+            return jnp.array(cs)
+
+    @partial(jax.jit, static_argnums=(0,))
+    def _augmented_lagrangian_objective(self, x, q_prop, multipliers, penalty):
+        """
+        Augmented Lagrangian objective function:
+        L(x,λ,ρ) = ||x - q_prop||² + ρ/2 * sum(max(0, -c_i(x) + λ_i/ρ)²) - 1/(2ρ) * sum(λ_i²)
+        """
+        # Original objective
+        distance_cost = jnp.sum((x - q_prop)**2)
+        
+        # Constraint values c_i(x) >= 0
+        constraints = self._projection_constraints(x)
+        
+        # Safety check for constraints
+        constraints = jnp.where(jnp.isfinite(constraints), constraints, 0.0)
+        
+        # Augmented Lagrangian terms with numerical stability
+        penalty_safe = jnp.maximum(penalty, 1e-8)  # Avoid division by zero
+        lagrangian_args = -constraints + multipliers / penalty_safe  # -c_i(x) + λ_i/ρ
+        penalty_terms = jnp.maximum(0.0, lagrangian_args)**2   # max(0, ...)²
+        
+        # Clip penalty terms to avoid overflow
+        penalty_terms = jnp.clip(penalty_terms, 0.0, 1e6)
+        augmented_term = penalty_safe / 2.0 * jnp.sum(penalty_terms)
+        
+        # Multiplier regularization term
+        regularization = -1.0 / (2.0 * penalty_safe) * jnp.sum(jnp.clip(multipliers**2, 0.0, 1e6))
+        
+        total_cost = distance_cost + augmented_term + regularization
+        
+        # Final safety check
+        total_cost = jnp.where(jnp.isfinite(total_cost), total_cost, distance_cost)
+        
+        return total_cost
+
+    @partial(jax.jit, static_argnums=(0,))
+    def project_to_safe_set(self, q_prop):
+        """Project proposed state to safe set using Augmented Lagrangian method"""
+        # Check if projection is enabled
+        if not self.enable_projection:
+            # If projection is disabled, just return the proposed state
+            return q_prop
+        
+        # Initialize variables
+        x = q_prop  # Start from proposed state
+        
+        # Count constraints to initialize multipliers
+        constraints_dummy = self._projection_constraints(q_prop)
+        num_constraints = constraints_dummy.shape[0]
+        multipliers = jnp.zeros(num_constraints)  # Initialize λ = 0
+        
+        # Augmented Lagrangian iterations
+        def outer_iteration(carry, _):
+            x, multipliers = carry
+            
+            # Inner optimization: minimize augmented Lagrangian w.r.t. x
+            def inner_iteration(x_inner, _):
+                # Compute gradient of augmented Lagrangian
+                grad = jax.grad(self._augmented_lagrangian_objective, argnums=0)(
+                    x_inner, q_prop, multipliers, self._lagrangian_penalty
+                )
+                
+                # Check for NaN or inf in gradient
+                grad = jnp.where(jnp.isfinite(grad), grad, 0.0)
+                
+                # Clip gradient norm for stability
+                grad_norm = jnp.linalg.norm(grad)
+                grad = jnp.where(grad_norm > self._max_grad_norm, 
+                                grad * self._max_grad_norm / grad_norm, grad)
+                
+                # Gradient descent step with smaller step size
+                x_new = x_inner - self._lagrangian_step_size * grad
+                
+                # Apply bounds: reasonable position limits and angle wrapping
+                x_new = x_new.at[0].set(jnp.clip(x_new[0], -100.0, 100.0))  # px bounds
+                x_new = x_new.at[1].set(jnp.clip(x_new[1], -100.0, 100.0))  # py bounds
+                x_new = x_new.at[2].set(jnp.clip(x_new[2], -2*jnp.pi, 2*jnp.pi))  # theta1
+                x_new = x_new.at[3].set(jnp.clip(x_new[3], -2*jnp.pi, 2*jnp.pi))  # theta2
+                
+                # Check for NaN/inf in result and fall back to previous state
+                x_new = jnp.where(jnp.isfinite(x_new), x_new, x_inner)
+                
+                return x_new, None
+            
+            # Run inner optimization (gradient descent)
+            x_optimized, _ = jax.lax.scan(
+                inner_iteration, x, None, length=self._lagrangian_inner_iters
+            )
+            
+            # Update multipliers: λ_i = max(0, λ_i + ρ * (-c_i(x)))
+            constraints = self._projection_constraints(x_optimized)
+            
+            # Check for NaN/inf in constraints
+            constraints = jnp.where(jnp.isfinite(constraints), constraints, 0.0)
+            
+            # Update multipliers with constraint violations
+            multiplier_update = self._lagrangian_penalty * (-constraints)
+            multipliers_new = jnp.maximum(0.0, multipliers + multiplier_update)
+            
+            # Clip multipliers to prevent explosion
+            multipliers_new = jnp.clip(multipliers_new, 0.0, 1000.0)
+            
+            # Check for NaN/inf in multipliers
+            multipliers_new = jnp.where(jnp.isfinite(multipliers_new), multipliers_new, multipliers)
+            
+            return (x_optimized, multipliers_new), None
+        
+        # Run outer iterations
+        (x_final, _), _ = jax.lax.scan(
+            outer_iteration, (x, multipliers), None, length=self._lagrangian_max_iters
+        )
+        
+        # Final safety check: if result has NaN/inf, return original proposed state
+        x_final = jnp.where(jnp.isfinite(x_final).all(), x_final, q_prop)
+        
+        return x_final
 
     def eval_xref_logpd(self, xs, motion_preference=None):
         """Evaluate log probability density with respect to reference trajectory"""

@@ -68,6 +68,7 @@ class MBDConfig:
     enable_gated_rollout_collision: bool = False  # whether to use gated rollout for obstacle collision
     hitch_penalty: float = 0.10  # penalty applied for hitch angle violations
     enable_gated_rollout_hitch: bool = False  # whether to use gated rollout for hitch violation
+    enable_projection: bool = True  # whether to use projection to safe set
     # physical parameters
     l1: float = 3.23  # tractor wheelbase
     l2: float = 2.9   # trailer length
@@ -136,6 +137,7 @@ def dict_to_config_obj(config_dict):
         enable_gated_rollout_collision=bool(config_dict.get("enable_gated_rollout_collision", True)),
         hitch_penalty=float(config_dict.get("hitch_penalty", 0.10)),
         enable_gated_rollout_hitch=bool(config_dict.get("enable_gated_rollout_hitch", True)),
+        enable_projection=bool(config_dict.get("enable_projection", False)),
         reward_threshold=float(config_dict.get("reward_threshold", 25.0)),
         ref_reward_threshold=float(config_dict.get("ref_reward_threshold", 5.0)),
         max_w_theta=float(config_dict.get("max_w_theta", 0.75)),
@@ -650,6 +652,7 @@ if __name__ == "__main__":
         enable_gated_rollout_collision=config.enable_gated_rollout_collision,
         hitch_penalty=config.hitch_penalty,
         enable_gated_rollout_hitch=config.enable_gated_rollout_hitch,
+        enable_projection=config.enable_projection,
         reward_threshold=config.reward_threshold,
         ref_reward_threshold=config.ref_reward_threshold,
         max_w_theta=config.max_w_theta,
@@ -690,4 +693,5 @@ if __name__ == "__main__":
         env.set_goal_pos(theta1=jnp.pi/2, theta2=jnp.pi/2)  # backward parking
     
     rew_final, Y0, trajectory_states, timing_info = run_diffusion(args=config, env=env)
+    print(f"final trajectory: {trajectory_states}")
     end_time = time.time()

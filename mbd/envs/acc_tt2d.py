@@ -125,14 +125,36 @@ class AccTractorTrailer2d(TractorTrailer2d):
         
         q = state.pipeline_state
         
-        # Conditionally use gated rollout or simple forward step based on configuration
+        # Propose next state via RK4
+        q_proposed = rk4(self.tractor_trailer_dynamics, q, u_scaled, self.dt)
+        
+        # Choose between three methods: projection, gated rollout, or naive penalty
+        def use_projection_fn(args):
+            q_prop, = args
+            q_safe = self.project_to_safe_set(q_prop)
+            return q_safe, False, False  # No penalties since guaranteed safe
+        
+        def use_gated_rollout_fn(args):
+            q_prop, = args
+            return self._step_with_gated_rollout((q, q_prop))
+        
+        def use_naive_penalty_fn(args):
+            q_prop, = args
+            return self._step_without_gated_rollout(q_prop)
+        
+        # Select method based on flags (three equal options)
         use_gated_rollout = self.enable_gated_rollout_collision | self.enable_gated_rollout_hitch
         
         q_final, obstacle_collision, hitch_violation = jax.lax.cond(
-            use_gated_rollout,
-            self._step_with_gated_rollout,
-            self._step_without_gated_rollout,
-            (q, u_scaled)
+            self.enable_projection,
+            use_projection_fn,
+            lambda args: jax.lax.cond(
+                use_gated_rollout,
+                use_gated_rollout_fn,
+                use_naive_penalty_fn,
+                args
+            ),
+            (q_proposed,)
         )
         
         # Compute reward using only position/angle states
@@ -152,39 +174,31 @@ class AccTractorTrailer2d(TractorTrailer2d):
     @partial(jax.jit, static_argnums=(0,))
     def _step_with_gated_rollout(self, data):
         """Step function with gated rollout enabled"""
-        q, u_scaled = data
-        return self.gated_rollout(q, u_scaled)
+        q, q_proposed = data
+        return self.gated_rollout(q, q_proposed)
     
     @partial(jax.jit, static_argnums=(0,))
-    def _step_without_gated_rollout(self, data):
+    def _step_without_gated_rollout(self, q_proposed):
         """Step function with simple forward dynamics (no gated rollout)"""
-        q, u_scaled = data
+        # Check collision and hitch violations on q_proposed (for penalty computation)
+        obstacle_collision = self.check_obstacle_collision(q_proposed[:4], self.obs_circles, self.obs_rectangles)
+        hitch_violation = self.check_hitch_violation(q_proposed[:4])
         
-        # Simple forward propagate one step
-        q_new = rk4(self.tractor_trailer_dynamics, q, u_scaled, self.dt)
-        
-        # Check collision and hitch violations on q_new (for penalty computation)
-        obstacle_collision = self.check_obstacle_collision(q_new[:4], self.obs_circles, self.obs_rectangles)
-        hitch_violation = self.check_hitch_violation(q_new[:4])
-        
-        return q_new, obstacle_collision, hitch_violation
+        return q_proposed, obstacle_collision, hitch_violation
 
     @partial(jax.jit, static_argnums=(0,))
-    def gated_rollout(self, q, u):
+    def gated_rollout(self, q, q_proposed):
         """
         Gated rollout for acceleration dynamics with correct safety checking logic.
         
         Logic:
-        1. Always do one step forward → q_new (this is what we want to update to)
+        1. Use pre-computed q_proposed as the desired next state
         2. If velocity is high, do additional rollout until stop → q_candidate_final (for safety checking only)
-        3. Check safety during the entire rollout (from q_new to q_candidate_final)
-        4. If safe → return q_new; if unsafe → return q (stick to previous state)
+        3. Check safety during the entire rollout (from q_proposed to q_candidate_final)
+        4. If safe → return q_proposed; if unsafe → return q (stick to previous state)
         """
-        px, py, theta1, theta2, v, delta = q
-        a, omega = u
-        
-        # Step 1: Always do one step forward (this is the desired next state)
-        q_new = rk4(self.tractor_trailer_dynamics, q, u, self.dt)
+        # Step 1: Use pre-computed proposed state (already computed via RK4 in step function)
+        q_new = q_proposed
         
         # Step 2: Check if we need additional rollout for safety checking
         v_new = q_new[4]
@@ -257,6 +271,28 @@ class AccTractorTrailer2d(TractorTrailer2d):
         )
         
         return obstacle_collision_any, hitch_violation_any
+
+    @partial(jax.jit, static_argnums=(0,))
+    def project_to_safe_set(self, q_prop):
+        """
+        Project 6D proposed state to safe set using parent 4D projection functions.
+        Only the first 4 elements (position/angle) are constrained for safety.
+        """
+        # Check if projection is enabled (via parent class)
+        if not self.enable_projection:
+            # If projection is disabled, just return the proposed state
+            return q_prop
+        
+        # Extract first 4 elements (position/angle states)
+        q_4d = q_prop[:4]
+        
+        # Project 4D state to safe set using parent function
+        q_4d_safe = super().project_to_safe_set(q_4d)
+        
+        # Reconstruct 6D state by keeping velocity and steering unchanged
+        q_safe = jnp.concatenate([q_4d_safe, q_prop[4:]])
+        
+        return q_safe
 
     def get_preference_penalty(self, x, u):
         """

@@ -24,7 +24,7 @@ dependencies = [
     "jax",
     "distrax",
     "gputil",
-    "jaxopt"
+    "jaxopt",
 ]
 
 [tool.setuptools]
