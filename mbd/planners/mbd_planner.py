@@ -513,20 +513,86 @@ def run_diffusion(args=None, env=None):
     xs = jnp.zeros((trajectory_length, state_init.pipeline_state.shape[0]))
     xs = xs.at[0].set(state_init.pipeline_state)  # Set initial state
     
+    # Set visualization mode for guidance (to get guided states in trajectory)
+    if hasattr(env, 'visualization_mode'):
+        logging.debug("Computing guided trajectory with visualization_mode=True...")
+        
+        # Use explicit visualization_mode parameter instead of trying to force recompilation
+        def step_with_guided_mode(state, action):
+            return env._step_internal(state, action, True)  # visualization_mode=True
+        
+        step_env_jit_guided = jax.jit(step_with_guided_mode)
+        
+        # Warm up the guided step function
+        dummy_state = state_init
+        dummy_action = jnp.zeros(env.action_size)
+        _ = step_env_jit_guided(dummy_state, dummy_action)
+        
+        logging.debug("Guided step function with explicit visualization_mode compiled")
+    else:
+        step_env_jit_guided = step_env_jit  # Use original if no visualization_mode
+    
     state = state_init
     
-    # Process trajectory states using pre-allocated arrays
+    # Process trajectory states using pre-allocated arrays and guided step function
     for t in range(Y0.shape[0]):
         action_raw = Y0[t]
         # Create a fresh array to avoid JAX type inconsistencies from array slicing
         action = jnp.array(action_raw)
         
-        state = step_env_jit(state, action)
+        state = step_env_jit_guided(state, action)  # Use guided step function
         # Use index assignment instead of concatenation to avoid recompilation
         xs = xs.at[t + 1].set(state.pipeline_state)
     
     trajectory_states = xs
     #print("Post-processing trajectory computation completed")
+    
+    # Trajectory computation completed - no need to reset visualization_mode since we use explicit parameters
+    logging.debug("Guided trajectory computation completed")
+    
+    # Compute guided vs unguided trajectory comparison if guidance was enabled
+    unguided_trajectory_states = None
+    if args.enable_guidance:
+        logging.debug("Computing unguided trajectory for comparison...")
+        
+        # Clear JIT cache to allow recompilation with different guidance setting
+        clear_jit_cache()
+        
+        # Temporarily disable guidance in environment
+        original_guidance_flag = env.enable_guidance
+        env.enable_guidance = False
+        
+        # Use explicit parameters instead of trying to force recompilation
+        def step_without_guidance(state, action):
+            return env._step_internal(state, action, False)  # visualization_mode=False
+        
+        step_env_jit = jax.jit(step_without_guidance)
+        
+        # Warm up the recompiled function
+        dummy_state = state_init
+        dummy_action = jnp.zeros(env.action_size)
+        _ = step_env_jit(dummy_state, dummy_action)
+        
+        # Compute unguided trajectory using the same action sequence
+        xs_unguided = jnp.zeros((trajectory_length, state_init.pipeline_state.shape[0]))
+        xs_unguided = xs_unguided.at[0].set(state_init.pipeline_state)  # Set initial state
+        
+        state_unguided = state_init
+        
+        # Process trajectory states without guidance
+        for t in range(Y0.shape[0]):
+            action_raw = Y0[t]
+            action = jnp.array(action_raw)
+            
+            state_unguided = step_env_jit(state_unguided, action)
+            xs_unguided = xs_unguided.at[t + 1].set(state_unguided.pipeline_state)
+        
+        unguided_trajectory_states = xs_unguided
+        
+        # Restore original guidance flag for environment
+        env.enable_guidance = original_guidance_flag
+        
+        logging.debug("Unguided trajectory comparison completed")
     
     post_processing_time = time.time() - post_processing_start_time
     
@@ -564,12 +630,34 @@ def run_diffusion(args=None, env=None):
         jnp.save(f"{path}/trajectory_states.npy", trajectory_states)
         
         #if args.env_name == "car2d":
-        fig, ax = plt.subplots(1, 1, figsize=(10, 10))
-        # rollout (trajectory already computed above)
-        env.render(ax, trajectory_states)
+        fig, ax = plt.subplots(1, 1, figsize=(12, 10))
+        
+        # Render main trajectory (kinematically feasible)
+        if args.enable_guidance and unguided_trajectory_states is not None:
+            # Use unguided trajectory for vehicle visualization (kinematically feasible)
+            env.render(ax, unguided_trajectory_states)
+            ax.plot(unguided_trajectory_states[:, 0], unguided_trajectory_states[:, 1], "b-", 
+                   linewidth=2, label="Unguided trajectory (kinematically feasible)", alpha=0.8)
+            
+            # Plot guided trajectory separately to show discrepancy
+            guided_trajectory = trajectory_states  # This was computed with guidance
+            ax.plot(guided_trajectory[:, 0], guided_trajectory[:, 1], "r--", 
+                   linewidth=2, label="Guided trajectory (reward-optimized)", alpha=0.8)
+            
+            # Add legend entry for guidance comparison
+            ax.text(0.02, 0.98, f"Guidance enabled: Showing both trajectories", 
+                   transform=ax.transAxes, fontsize=10, verticalalignment='top',
+                   bbox=dict(boxstyle="round,pad=0.3", facecolor="lightblue", alpha=0.7))
+        else:
+            # Standard rendering for other methods
+            env.render(ax, trajectory_states)
+        
+        # Add demonstration path if available
         if args.enable_demo and hasattr(env, 'xref') and env.xref is not None:
             ax.plot(env.xref[:, 0], env.xref[:, 1], "g--", linewidth=2, label="Demonstration path", alpha=0.7)
+        
         ax.legend()
+        ax.set_title(f"MBD Planner Result ({'with Guidance' if args.enable_guidance else 'without Guidance'})")
         
         plt.switch_backend('TkAgg')  # Switch to interactive backend
         plt.draw()  # Ensure the plot is fully rendered
@@ -584,20 +672,41 @@ def run_diffusion(args=None, env=None):
         # Create animation if requested
         if args.save_animation or args.show_animation:
             # Prepare trajectory data for animation
-            trajectory_states_list = [state_init.pipeline_state]
-            trajectory_actions = []
-            state = state_init
-            for t in range(Y0.shape[0]):  # Use Y0
-                action = Y0[t]
-                trajectory_actions.append(action)
-                state = step_env_jit(state, action)
-                trajectory_states_list.append(state.pipeline_state)
-            
-            # Add final state with no action
-            trajectory_actions.append(None)
-            
-            # Create animation
-            create_animation(env, trajectory_states_list, trajectory_actions, args)
+            if args.enable_guidance and unguided_trajectory_states is not None:
+                # For guidance: use unguided trajectory for tractor-trailer animation (kinematically feasible)
+                # but also prepare guided trajectory for overlay
+                
+                # Unguided trajectory for vehicle animation
+                unguided_trajectory_list = [unguided_trajectory_states[i] for i in range(len(unguided_trajectory_states))]
+                trajectory_actions = []
+                
+                # Prepare actions (same as before)
+                for t in range(Y0.shape[0]):  
+                    trajectory_actions.append(Y0[t])
+                trajectory_actions.append(None)  # Final state with no action
+                
+                # Guided trajectory for path overlay (already computed)
+                guided_trajectory_list = [trajectory_states[i] for i in range(len(trajectory_states))]
+                
+                # Create animation with both trajectories
+                create_animation(env, unguided_trajectory_list, trajectory_actions, args, 
+                               guided_trajectory_overlay=guided_trajectory_list)
+            else:
+                # Standard animation logic (no guidance or guidance failed)
+                trajectory_states_list = [state_init.pipeline_state]
+                trajectory_actions = []
+                state = state_init
+                for t in range(Y0.shape[0]):  # Use Y0
+                    action = Y0[t]
+                    trajectory_actions.append(action)
+                    state = step_env_jit(state, action)
+                    trajectory_states_list.append(state.pipeline_state)
+                
+                # Add final state with no action
+                trajectory_actions.append(None)
+                
+                # Create standard animation
+                create_animation(env, trajectory_states_list, trajectory_actions, args)
             
                 # Create denoising animation if requested
         if args.save_denoising_animation:
@@ -622,7 +731,7 @@ def run_diffusion(args=None, env=None):
     logging.debug(f"Final reward:            {rew_final:.3e}")
     logging.debug("=====================")
 
-    return rew_final, Y0, trajectory_states, timing_info
+    return rew_final, Y0, trajectory_states, timing_info, unguided_trajectory_states
 
 
 
@@ -688,13 +797,13 @@ if __name__ == "__main__":
     # Set initial position using geometric parameters relative to parking lot
     # dx: distance from tractor front face to target parking space center
     # dy: distance from tractor to parking lot entrance line
-    env.set_init_pos(dx=9.0, dy=2.0, theta1=0, theta2=0)
+    env.set_init_pos(dx=-5.0, dy=2.0, theta1=0, theta2=0)
     if config.motion_preference == -2:
         env.set_init_pos(dx=-12.0, dy=1.0, theta1=jnp.pi, theta2=jnp.pi)
     # Set goal angles based on motion preference
     if config.motion_preference in [-1, -2]:  # backward parking
         env.set_goal_pos(theta1=jnp.pi/2, theta2=jnp.pi/2)  # backward parking
     
-    rew_final, Y0, trajectory_states, timing_info = run_diffusion(args=config, env=env)
+    rew_final, Y0, trajectory_states, timing_info, unguided_trajectory_states = run_diffusion(args=config, env=env)
     #print(f"final trajectory: {trajectory_states}")
     end_time = time.time()

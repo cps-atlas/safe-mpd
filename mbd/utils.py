@@ -118,8 +118,16 @@ def export_video(env_name, animation_type="trajectory", video_name=None):
         print(f"FFmpeg failed with return code: {result}")
 
 
-def create_animation(env, trajectory_states, trajectory_actions, args):
-    """Create animation of the tractor-trailer trajectory"""
+def create_animation(env, trajectory_states, trajectory_actions, args, guided_trajectory_overlay=None):
+    """Create animation of the tractor-trailer trajectory
+    
+    Args:
+        env: Environment object
+        trajectory_states: Main trajectory states for vehicle animation (usually unguided for guidance case)
+        trajectory_actions: Actions corresponding to trajectory states  
+        args: Configuration arguments
+        guided_trajectory_overlay: Optional guided trajectory states to overlay as path
+    """
     print("Creating animation...")
     
     # Setup animation saving if enabled
@@ -235,7 +243,16 @@ def create_animation(env, trajectory_states, trajectory_actions, args):
     env.setup_animation_patches(ax)
     
     # Add trajectory trace
-    trajectory_line, = ax.plot([], [], 'b-', alpha=0.8, linewidth=3, label='Trajectory', zorder=4)
+    if guided_trajectory_overlay is not None:
+        trajectory_line, = ax.plot([], [], 'b-', alpha=0.8, linewidth=3, label='Unguided trajectory', zorder=4)
+    else:
+        trajectory_line, = ax.plot([], [], 'b-', alpha=0.8, linewidth=3, label='Trajectory', zorder=4)
+    
+    # Add guided trajectory overlay if provided
+    guided_trajectory_line = None
+    if guided_trajectory_overlay is not None:
+        guided_trajectory_line, = ax.plot([], [], 'r--', alpha=0.8, linewidth=2, 
+                                        label='Guided trajectory', zorder=3)
     
     # Add violation markers to legend using colored squares
     # Create square patches for violation markers
@@ -274,6 +291,8 @@ def create_animation(env, trajectory_states, trajectory_actions, args):
     # Animation loop
     traj_x = []
     traj_y = []
+    guided_traj_x = []
+    guided_traj_y = []
     violation_markers = []  # Store references to exclamation mark text objects
     
     for frame_idx, (state, action) in enumerate(zip(trajectory_states, trajectory_actions)):
@@ -316,6 +335,13 @@ def create_animation(env, trajectory_states, trajectory_actions, args):
         traj_x.append(state_np[0])
         traj_y.append(state_np[1])
         trajectory_line.set_data(traj_x, traj_y)
+        
+        # Update guided trajectory overlay progressively if provided
+        if guided_trajectory_line is not None and frame_idx < len(guided_trajectory_overlay):
+            guided_state = guided_trajectory_overlay[frame_idx]
+            guided_traj_x.append(guided_state[0])
+            guided_traj_y.append(guided_state[1])
+            guided_trajectory_line.set_data(guided_traj_x, guided_traj_y)
         
         # Update plot
         if args.show_animation:

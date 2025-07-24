@@ -63,6 +63,9 @@ class TractorTrailer2d:
         self.enable_projection = enable_projection
         self.enable_guidance = enable_guidance
         
+        # Mode flag: True during final visualization (use guided states), False during denoising (kinematic consistency)
+        self.visualization_mode = False
+        
         # Reward thresholds
         self.reward_threshold = reward_threshold
         self.ref_reward_threshold = ref_reward_threshold
@@ -271,6 +274,11 @@ class TractorTrailer2d:
     @partial(jax.jit, static_argnums=(0,))
     def step(self, state: State, action: jax.Array) -> State:
         """Run one timestep of the environment's dynamics."""
+        return self._step_internal(state, action, self.visualization_mode)
+    
+    @partial(jax.jit, static_argnums=(0, 3))  # visualization_mode is static argument 3
+    def _step_internal(self, state: State, action: jax.Array, visualization_mode: bool) -> State:
+        """Internal step function with explicit visualization_mode parameter."""
         action = jnp.clip(action, -1.0, 1.0)
         
         # Scale inputs from normalized [-1, 1] to actual ranges
@@ -284,13 +292,19 @@ class TractorTrailer2d:
             u_safe_normalized = self.project_control_to_safe_set(q, action)  # action is normalized
             u_safe_scaled = self.input_scaler(u_safe_normalized)  # Scale to actual ranges
             q_final = rk4(self.tractor_trailer_dynamics, q, u_safe_scaled, self.dt)
+            q_reward = q_final  # For projection, q_reward = q_final
             obstacle_collision = False  # Guaranteed safe by projection
             hitch_violation = False     # Guaranteed safe by projection
         elif self.enable_guidance:
-            # Use guidance: compute proposed state, then apply gradient descent guidance
+            # Use guidance: compute proposed state, apply guidance for reward computation
             q_proposed = rk4(self.tractor_trailer_dynamics, q, u_scaled, self.dt)
-            q_final = self.apply_guidance(q_proposed)
+            q_reward = self.apply_guidance(q_proposed)  # Guided state for reward computation
             
+            # During denoising: use q_proposed for kinematic consistency
+            # During visualization: use q_reward to show actual guided trajectory
+            q_final = q_reward if visualization_mode else q_proposed
+            
+            # Collision flags are handled by guidance, not through naive penalty
             obstacle_collision = False  # constraints are handled by guidance, not through naive penalty
             hitch_violation = False     # constraints are handled by guidance, not through naive penalty
         else:
@@ -314,9 +328,10 @@ class TractorTrailer2d:
                 use_naive_penalty_fn,
                 (q_proposed,)
             )
+            q_reward = q_final  # For other methods, q_reward = q_final
         
-        # Compute reward
-        reward = self.get_reward(q_final)
+        # Compute reward on q_reward (the state we want to evaluate)
+        reward = self.get_reward(q_reward)
         
         # Apply penalties using flags (only if violations were checked)
         reward = jnp.where(obstacle_collision, reward - self.collision_penalty, reward)
@@ -327,6 +342,7 @@ class TractorTrailer2d:
         has_preference = self.motion_preference != 0
         reward = jnp.where(has_preference, reward - preference_penalty, reward)
         
+        # Return q_final as the next state (ensures kinematic consistency)
         return state.replace(pipeline_state=q_final, obs=q_final, reward=reward, done=0.0)
 
     @partial(jax.jit, static_argnums=(0,))
@@ -1798,7 +1814,7 @@ class TractorTrailer2d:
         trailer_pos = jnp.array([trailer_x, trailer_y])
         
         total_cost = 0.0
-        safety_margin = 1.5  # Safety margin around obstacles
+        safety_margin = 2.0  # Safety margin around obstacles
         
         # Penalty for circular obstacles (simple point-to-circle distance)
         if self.obs_circles.shape[0] > 0:
@@ -1819,36 +1835,52 @@ class TractorTrailer2d:
                 total_cost += tractor_violation ** 2 + trailer_violation ** 2
         
         # Penalty for rectangular obstacles (simple point-to-center distance)
-        if self.obs_rectangles.shape[0] > 0:
-            for i in range(self.obs_rectangles.shape[0]):
-                rect = self.obs_rectangles[i]
-                rect_center = rect[:2]
-                rect_size = jnp.maximum(rect[2], rect[3])  # Use max of width/height as rough radius
+        # if self.obs_rectangles.shape[0] > 0:
+        #     for i in range(self.obs_rectangles.shape[0]):
+        #         rect = self.obs_rectangles[i]
+        #         rect_center = rect[:2]
+        #         rect_size = jnp.maximum(rect[2], rect[3])  # Use max of width/height as rough radius
                 
-                # Distance from tractor to rectangle center
-                tractor_dist = jnp.linalg.norm(tractor_pos - rect_center)
-                tractor_violation = jnp.maximum(0.0, rect_size/2 + safety_margin - tractor_dist)
+        #         # Distance from tractor to rectangle center
+        #         tractor_dist = jnp.linalg.norm(tractor_pos - rect_center)
+        #         tractor_violation = jnp.maximum(0.0, rect_size/2 + safety_margin - tractor_dist)
                 
-                # Distance from trailer to rectangle center
-                trailer_dist = jnp.linalg.norm(trailer_pos - rect_center)
-                trailer_violation = jnp.maximum(0.0, rect_size/2 + safety_margin - trailer_dist)
+        #         # Distance from trailer to rectangle center
+        #         trailer_dist = jnp.linalg.norm(trailer_pos - rect_center)
+        #         trailer_violation = jnp.maximum(0.0, rect_size/2 + safety_margin - trailer_dist)
                 
-                # Add squared penalties
-                total_cost += tractor_violation ** 2 + trailer_violation ** 2
+        #         # Add squared penalties
+        #         total_cost += tractor_violation ** 2 + trailer_violation ** 2
         
-        # Simple hitch angle penalty
-        wrap_pi = lambda a: (a + jnp.pi) % (2*jnp.pi) - jnp.pi
-        hitch_angle = wrap_pi(theta1 - theta2)
-        hitch_violation = jnp.maximum(0.0, jnp.abs(hitch_angle) - self.phi_max)
-        total_cost += hitch_violation ** 2
+        # Improved hitch angle penalty - more differentiable and properly weighted
+        # Instead of wrap_pi which has discontinuous gradients, use a smooth penalty
+        hitch_angle_raw = theta1 - theta2
+        
+        # Use multiple periodic penalties to handle angle wrapping smoothly
+        # This creates a smooth, differentiable function that penalizes large hitch angles
+        hitch_penalties = []
+        for offset in [0.0, 2*jnp.pi, -2*jnp.pi]:  # Consider multiple wrapping points
+            adjusted_angle = hitch_angle_raw + offset
+            angle_magnitude = jnp.abs(adjusted_angle)
+            hitch_violation = jnp.maximum(0.0, angle_magnitude - self.phi_max)
+            hitch_penalties.append(hitch_violation ** 2)
+        
+        # Use the minimum penalty (most favorable interpretation)
+        hitch_penalty = jnp.min(jnp.array(hitch_penalties))
+        
+        # Scale by number of obstacles to balance against collision constraints
+        num_total_obstacles = (self.obs_circles.shape[0] + self.obs_rectangles.shape[0])
+        hitch_weight = jnp.maximum(1.0, num_total_obstacles * 0.05)  # At least 5x weight
+        
+        total_cost += hitch_weight * hitch_penalty
         
         # Small regularization for numerical stability
-        total_cost += 1e-6 * jnp.sum(x ** 2)
+        #total_cost +=  jnp.sum(x ** 2)
         
         return total_cost
 
     @partial(jax.jit, static_argnums=(0, 3))  # Make max_steps static (position 3)
-    def apply_guidance(self, q_proposed, step_size=0.01, max_steps=1):
+    def apply_guidance(self, q_proposed, step_size=0.1, max_steps=1):
         """
         Apply gradient descent guidance to move the proposed state away from constraint violations.
         
