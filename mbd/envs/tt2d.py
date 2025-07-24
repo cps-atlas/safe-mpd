@@ -1839,7 +1839,7 @@ class TractorTrailer2d:
         
         try:
             # Use trust-constr which handles nonlinear constraints well
-            print("Asdf")
+            print("WIP... Running Trust-Region Constrained Method for Projection in CPU...")
             result = minimize(
                 objective, 
                 u0, 
@@ -1893,22 +1893,3 @@ class TractorTrailer2d:
         )
         
         return u_projected
-
-    def project_to_safe_set(self, q_prop, q_current=None, u_original=None):
-        """
-        Legacy project_to_safe_set method for compatibility.
-        
-        For proper control-based projection, use the step function with enable_projection=True.
-        """
-        if not self.enable_projection:
-            return q_prop
-            
-        # If we have both current state and original control, use control projection
-        if q_current is not None and u_original is not None:
-            u_safe = self.project_control_to_safe_set(q_current, u_original)
-            u_safe_scaled = self.input_scaler(u_safe)
-            q_safe = rk4(self.tractor_trailer_dynamics, q_current, u_safe_scaled, self.dt)
-            return q_safe
-        else:
-            # Fallback to original proposed state
-            return q_prop
