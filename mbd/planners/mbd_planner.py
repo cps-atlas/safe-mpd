@@ -65,10 +65,11 @@ class MBDConfig:
     motion_preference: int = 0  # 0=none, 1=forward, -1=backward
     # collision handling
     collision_penalty: float = 0.15  # penalty applied for obstacle collisions
-    enable_gated_rollout_collision: bool = True  # whether to use gated rollout for obstacle collision
+    enable_gated_rollout_collision: bool = False  # whether to use gated rollout for obstacle collision
     hitch_penalty: float = 0.10  # penalty applied for hitch angle violations
-    enable_gated_rollout_hitch: bool = True  # whether to use gated rollout for hitch violation
+    enable_gated_rollout_hitch: bool = False  # whether to use gated rollout for hitch violation
     enable_projection: bool = False  # whether to use projection to safe set
+    enable_guidance: bool = True  # whether to use gradient descent guidance for safety
     # physical parameters
     l1: float = 3.23  # tractor wheelbase
     l2: float = 2.9   # trailer length
@@ -138,6 +139,7 @@ def dict_to_config_obj(config_dict):
         hitch_penalty=float(config_dict.get("hitch_penalty", 0.10)),
         enable_gated_rollout_hitch=bool(config_dict.get("enable_gated_rollout_hitch", True)),
         enable_projection=bool(config_dict.get("enable_projection", False)),
+        enable_guidance=bool(config_dict.get("enable_guidance", False)),
         reward_threshold=float(config_dict.get("reward_threshold", 25.0)),
         ref_reward_threshold=float(config_dict.get("ref_reward_threshold", 5.0)),
         max_w_theta=float(config_dict.get("max_w_theta", 0.75)),
@@ -653,6 +655,7 @@ if __name__ == "__main__":
         hitch_penalty=config.hitch_penalty,
         enable_gated_rollout_hitch=config.enable_gated_rollout_hitch,
         enable_projection=config.enable_projection,
+        enable_guidance=config.enable_guidance,
         reward_threshold=config.reward_threshold,
         ref_reward_threshold=config.ref_reward_threshold,
         max_w_theta=config.max_w_theta,

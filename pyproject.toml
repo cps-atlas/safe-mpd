@@ -25,6 +25,7 @@ dependencies = [
     "distrax",
     "gputil",
     "jaxopt",
+    "flax>=0.10.7",
 ]
 
 [tool.setuptools]

@@ -43,7 +43,7 @@ class TractorTrailer2d:
     """
     def __init__(self, x0=None, xg=None, env_config=None, case="parking", dt=0.2, H=50, motion_preference=0, 
                  collision_penalty=0.15, enable_gated_rollout_collision=False, hitch_penalty=0.10, 
-                 enable_gated_rollout_hitch=True, enable_projection=False, reward_threshold=25.0, ref_reward_threshold=5.0,
+                 enable_gated_rollout_hitch=True, enable_projection=False, enable_guidance=False, reward_threshold=25.0, ref_reward_threshold=5.0,
                  max_w_theta=0.75, hitch_angle_weight=0.2, l1=3.23, l2=2.9, lh=1.15, 
                  tractor_width=2.0, trailer_width=2.5, v_max=3.0, delta_max_deg=55.0,
                  d_thr_factor=1.0, k_switch=2.5, steering_weight=0.05, preference_penalty_weight=0.05,
@@ -61,6 +61,7 @@ class TractorTrailer2d:
         self.hitch_penalty = hitch_penalty
         self.enable_gated_rollout_hitch = enable_gated_rollout_hitch
         self.enable_projection = enable_projection
+        self.enable_guidance = enable_guidance
         
         # Reward thresholds
         self.reward_threshold = reward_threshold
@@ -150,14 +151,7 @@ class TractorTrailer2d:
         if hasattr(self.env, 'print_parking_layout'):
             self.env.print_parking_layout()
         
-        # Set up Lagrangian-based projection solver parameters
-        if self.enable_projection:
-            # Lagrangian solver parameters (more conservative for numerical stability)
-            self._lagrangian_penalty = 10.0   # penalty parameter ρ (reduced from 1000)
-            self._lagrangian_max_iters = 5    # outer iterations for multiplier updates
-            self._lagrangian_inner_iters = 20 # inner iterations for x optimization  
-            self._lagrangian_step_size = 0.001 # gradient descent step size (reduced from 0.01)
-            self._max_grad_norm = 10.0         # gradient clipping threshold
+
 
     def set_init_pos(self, x=None, y=None, dx=None, dy=None, theta1=0.0, theta2=0.0):
         """
@@ -292,8 +286,15 @@ class TractorTrailer2d:
             q_final = rk4(self.tractor_trailer_dynamics, q, u_safe_scaled, self.dt)
             obstacle_collision = False  # Guaranteed safe by projection
             hitch_violation = False     # Guaranteed safe by projection
+        elif self.enable_guidance:
+            # Use guidance: compute proposed state, then apply gradient descent guidance
+            q_proposed = rk4(self.tractor_trailer_dynamics, q, u_scaled, self.dt)
+            q_final = self.apply_guidance(q_proposed)
+            
+            obstacle_collision = False  # constraints are handled by guidance, not through naive penalty
+            hitch_violation = False     # constraints are handled by guidance, not through naive penalty
         else:
-            # Use original conditional logic for non-projection methods
+            # Use original conditional logic for non-projection/non-guidance methods
             q_proposed = rk4(self.tractor_trailer_dynamics, q, u_scaled, self.dt)
             
             def use_gated_rollout_fn(args):
@@ -1162,121 +1163,7 @@ class TractorTrailer2d:
         else:
             return jnp.array(cs)
 
-    @partial(jax.jit, static_argnums=(0,))
-    def _augmented_lagrangian_objective(self, x, q_prop, multipliers, penalty):
-        """
-        Augmented Lagrangian objective function:
-        L(x,λ,ρ) = ||x - q_prop||² + ρ/2 * sum(max(0, -c_i(x) + λ_i/ρ)²) - 1/(2ρ) * sum(λ_i²)
-        """
-        # Original objective
-        distance_cost = jnp.sum((x - q_prop)**2)
-        
-        # Constraint values c_i(x) >= 0
-        constraints = self._projection_constraints(x)
-        
-        # Safety check for constraints
-        constraints = jnp.where(jnp.isfinite(constraints), constraints, 0.0)
-        
-        # Augmented Lagrangian terms with numerical stability
-        penalty_safe = jnp.maximum(penalty, 1e-8)  # Avoid division by zero
-        lagrangian_args = -constraints + multipliers / penalty_safe  # -c_i(x) + λ_i/ρ
-        penalty_terms = jnp.maximum(0.0, lagrangian_args)**2   # max(0, ...)²
-        
-        # Clip penalty terms to avoid overflow
-        penalty_terms = jnp.clip(penalty_terms, 0.0, 1e6)
-        augmented_term = penalty_safe / 2.0 * jnp.sum(penalty_terms)
-        
-        # Multiplier regularization term
-        regularization = -1.0 / (2.0 * penalty_safe) * jnp.sum(jnp.clip(multipliers**2, 0.0, 1e6))
-        
-        total_cost = distance_cost + augmented_term + regularization
-        
-        # Final safety check
-        total_cost = jnp.where(jnp.isfinite(total_cost), total_cost, distance_cost)
-        
-        return total_cost
 
-    @partial(jax.jit, static_argnums=(0,))
-    def project_to_safe_set(self, q_prop):
-        """Project proposed state to safe set using Augmented Lagrangian method"""
-        # Check if projection is enabled
-        if not self.enable_projection:
-            # If projection is disabled, just return the proposed state
-            return q_prop
-        
-        # Initialize variables
-        x = q_prop  # Start from proposed state
-        
-        # Count constraints to initialize multipliers
-        constraints_dummy = self._projection_constraints(q_prop)
-        num_constraints = constraints_dummy.shape[0]
-        multipliers = jnp.zeros(num_constraints)  # Initialize λ = 0
-        
-        # Augmented Lagrangian iterations
-        def outer_iteration(carry, _):
-            x, multipliers = carry
-            
-            # Inner optimization: minimize augmented Lagrangian w.r.t. x
-            def inner_iteration(x_inner, _):
-                # Compute gradient of augmented Lagrangian
-                grad = jax.grad(self._augmented_lagrangian_objective, argnums=0)(
-                    x_inner, q_prop, multipliers, self._lagrangian_penalty
-                )
-                
-                # Check for NaN or inf in gradient
-                grad = jnp.where(jnp.isfinite(grad), grad, 0.0)
-                
-                # Clip gradient norm for stability
-                grad_norm = jnp.linalg.norm(grad)
-                grad = jnp.where(grad_norm > self._max_grad_norm, 
-                                grad * self._max_grad_norm / grad_norm, grad)
-                
-                # Gradient descent step with smaller step size
-                x_new = x_inner - self._lagrangian_step_size * grad
-                
-                # Apply bounds: reasonable position limits and angle wrapping
-                x_new = x_new.at[0].set(jnp.clip(x_new[0], -100.0, 100.0))  # px bounds
-                x_new = x_new.at[1].set(jnp.clip(x_new[1], -100.0, 100.0))  # py bounds
-                x_new = x_new.at[2].set(jnp.clip(x_new[2], -2*jnp.pi, 2*jnp.pi))  # theta1
-                x_new = x_new.at[3].set(jnp.clip(x_new[3], -2*jnp.pi, 2*jnp.pi))  # theta2
-                
-                # Check for NaN/inf in result and fall back to previous state
-                x_new = jnp.where(jnp.isfinite(x_new), x_new, x_inner)
-                
-                return x_new, None
-            
-            # Run inner optimization (gradient descent)
-            x_optimized, _ = jax.lax.scan(
-                inner_iteration, x, None, length=self._lagrangian_inner_iters
-            )
-            
-            # Update multipliers: λ_i = max(0, λ_i + ρ * (-c_i(x)))
-            constraints = self._projection_constraints(x_optimized)
-            
-            # Check for NaN/inf in constraints
-            constraints = jnp.where(jnp.isfinite(constraints), constraints, 0.0)
-            
-            # Update multipliers with constraint violations
-            multiplier_update = self._lagrangian_penalty * (-constraints)
-            multipliers_new = jnp.maximum(0.0, multipliers + multiplier_update)
-            
-            # Clip multipliers to prevent explosion
-            multipliers_new = jnp.clip(multipliers_new, 0.0, 1000.0)
-            
-            # Check for NaN/inf in multipliers
-            multipliers_new = jnp.where(jnp.isfinite(multipliers_new), multipliers_new, multipliers)
-            
-            return (x_optimized, multipliers_new), None
-        
-        # Run outer iterations
-        (x_final, _), _ = jax.lax.scan(
-            outer_iteration, (x, multipliers), None, length=self._lagrangian_max_iters
-        )
-        
-        # Final safety check: if result has NaN/inf, return original proposed state
-        x_final = jnp.where(jnp.isfinite(x_final).all(), x_final, q_prop)
-        
-        return x_final
 
     def eval_xref_logpd(self, xs, motion_preference=None):
         """Evaluate log probability density with respect to reference trajectory"""
@@ -1893,3 +1780,111 @@ class TractorTrailer2d:
         )
         
         return u_projected
+
+    @partial(jax.jit, static_argnums=(0,))
+    def _guidance_function(self, x):
+        """
+        Simplified guidance function for gradient descent.
+        Uses basic point-to-point distances instead of complex SDFs to ensure differentiability.
+        """
+        px, py, theta1, theta2 = x[:4]
+        
+        # Get tractor and trailer positions (simplified)
+        tractor_pos = jnp.array([px, py])
+        
+        # Simple trailer position approximation
+        trailer_x = px - self.lh * jnp.cos(theta1) - self.l2 * jnp.cos(theta2)
+        trailer_y = py - self.lh * jnp.sin(theta1) - self.l2 * jnp.sin(theta2)
+        trailer_pos = jnp.array([trailer_x, trailer_y])
+        
+        total_cost = 0.0
+        safety_margin = 1.5  # Safety margin around obstacles
+        
+        # Penalty for circular obstacles (simple point-to-circle distance)
+        if self.obs_circles.shape[0] > 0:
+            for i in range(self.obs_circles.shape[0]):
+                circle = self.obs_circles[i]
+                circle_center = circle[:2]
+                circle_radius = circle[2]
+                
+                # Distance from tractor to circle center
+                tractor_dist = jnp.linalg.norm(tractor_pos - circle_center)
+                tractor_violation = jnp.maximum(0.0, circle_radius + safety_margin - tractor_dist)
+                
+                # Distance from trailer to circle center
+                trailer_dist = jnp.linalg.norm(trailer_pos - circle_center)
+                trailer_violation = jnp.maximum(0.0, circle_radius + safety_margin - trailer_dist)
+                
+                # Add squared penalties
+                total_cost += tractor_violation ** 2 + trailer_violation ** 2
+        
+        # Penalty for rectangular obstacles (simple point-to-center distance)
+        if self.obs_rectangles.shape[0] > 0:
+            for i in range(self.obs_rectangles.shape[0]):
+                rect = self.obs_rectangles[i]
+                rect_center = rect[:2]
+                rect_size = jnp.maximum(rect[2], rect[3])  # Use max of width/height as rough radius
+                
+                # Distance from tractor to rectangle center
+                tractor_dist = jnp.linalg.norm(tractor_pos - rect_center)
+                tractor_violation = jnp.maximum(0.0, rect_size/2 + safety_margin - tractor_dist)
+                
+                # Distance from trailer to rectangle center
+                trailer_dist = jnp.linalg.norm(trailer_pos - rect_center)
+                trailer_violation = jnp.maximum(0.0, rect_size/2 + safety_margin - trailer_dist)
+                
+                # Add squared penalties
+                total_cost += tractor_violation ** 2 + trailer_violation ** 2
+        
+        # Simple hitch angle penalty
+        wrap_pi = lambda a: (a + jnp.pi) % (2*jnp.pi) - jnp.pi
+        hitch_angle = wrap_pi(theta1 - theta2)
+        hitch_violation = jnp.maximum(0.0, jnp.abs(hitch_angle) - self.phi_max)
+        total_cost += hitch_violation ** 2
+        
+        # Small regularization for numerical stability
+        total_cost += 1e-6 * jnp.sum(x ** 2)
+        
+        return total_cost
+
+    @partial(jax.jit, static_argnums=(0, 3))  # Make max_steps static (position 3)
+    def apply_guidance(self, q_proposed, step_size=0.01, max_steps=1):
+        """
+        Apply gradient descent guidance to move the proposed state away from constraint violations.
+        
+        Args:
+            q_proposed: Proposed state that may violate constraints
+            step_size: Gradient descent step size
+            max_steps: Number of gradient descent steps (default 1 as requested) - must be static
+            
+        Returns:
+            q_guided: State after applying guidance
+        """
+        if not self.enable_guidance:
+            return q_proposed
+        
+        def guidance_step(x, _):
+            # Compute gradient of guidance function
+            grad = jax.grad(self._guidance_function)(x)
+            
+            # Check for NaN or inf in gradient
+            grad = jnp.where(jnp.isfinite(grad), grad, 0.0)
+            
+            # Gradient descent step (move in negative gradient direction to minimize cost)
+            x_new = x - step_size * grad
+            
+            # Apply reasonable bounds to keep state valid
+            x_new = x_new.at[0].set(jnp.clip(x_new[0], -100.0, 100.0))  # px bounds
+            x_new = x_new.at[1].set(jnp.clip(x_new[1], -100.0, 100.0))  # py bounds
+            x_new = x_new.at[2].set(jnp.clip(x_new[2], -2*jnp.pi, 2*jnp.pi))  # theta1
+            x_new = x_new.at[3].set(jnp.clip(x_new[3], -2*jnp.pi, 2*jnp.pi))  # theta2
+            
+            # Safety check: if result has NaN/inf, return previous state
+            x_new = jnp.where(jnp.isfinite(x_new), x_new, x)
+            
+            return x_new, None
+        
+        # Apply gradient descent steps
+        x_final, _ = jax.lax.scan(guidance_step, q_proposed, None, length=max_steps)
+        
+        return x_final
