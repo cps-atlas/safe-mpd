@@ -49,6 +49,7 @@ class Env:
             'space_length': 7.0,    # Length of each parking space
             'parking_y_offset': 4.0, # Distance from start area to parking lot
             'occupied_spaces': [1, 2, 4, 5, 6, 7, 9, 10, 12, 13, 14, 15 ],  # 1-indexed, 4 and 9 are vacant
+            #'occupied_spaces': [4,12],  # 1-indexed, 4 and 9 are vacant
             #'occupied_spaces': [],  # 1-indexed, 4 and 9 are vacant
             'target_spaces': [3, 11],  # Target: tractor in 4, trailer in 9
             'obstacle_radius': 1.0,   # Radius of obstacles in occupied spaces

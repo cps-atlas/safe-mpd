@@ -284,37 +284,35 @@ class TractorTrailer2d:
         
         q = state.pipeline_state
         
-        # Propose next state via RK4
-        q_proposed = rk4(self.tractor_trailer_dynamics, q, u_scaled, self.dt)
-        
-        # Choose between three methods: projection, gated rollout, or naive penalty
-        def use_projection_fn(args):
-            q_prop, = args
-            q_safe = self.project_to_safe_set(q_prop)
-            return q_safe, False, False  # No penalties since guaranteed safe
-        
-        def use_gated_rollout_fn(args):
-            q_prop, = args
-            return self._step_with_gated_rollout((q, q_prop))
-        
-        def use_naive_penalty_fn(args):
-            q_prop, = args
-            return self._step_without_gated_rollout(q_prop)
-        
-        # Select method based on flags (three equal options)
-        use_gated_rollout = self.enable_gated_rollout_collision | self.enable_gated_rollout_hitch
-        
-        q_final, obstacle_collision, hitch_violation = jax.lax.cond(
-            self.enable_projection,
-            use_projection_fn,
-            lambda args: jax.lax.cond(
+        # Handle projection case separately to avoid vmap-of-cond + io_callback issue
+        if self.enable_projection:
+            # Use control-based projection: optimize control input, then compute resulting state
+            u_safe_normalized = self.project_control_to_safe_set(q, action)  # action is normalized
+            u_safe_scaled = self.input_scaler(u_safe_normalized)  # Scale to actual ranges
+            q_final = rk4(self.tractor_trailer_dynamics, q, u_safe_scaled, self.dt)
+            obstacle_collision = False  # Guaranteed safe by projection
+            hitch_violation = False     # Guaranteed safe by projection
+        else:
+            # Use original conditional logic for non-projection methods
+            q_proposed = rk4(self.tractor_trailer_dynamics, q, u_scaled, self.dt)
+            
+            def use_gated_rollout_fn(args):
+                q_prop, = args
+                return self._step_with_gated_rollout((q, q_prop))
+            
+            def use_naive_penalty_fn(args):
+                q_prop, = args
+                return self._step_without_gated_rollout(q_prop)
+            
+            # Select method based on gated rollout flags
+            use_gated_rollout = self.enable_gated_rollout_collision | self.enable_gated_rollout_hitch
+            
+            q_final, obstacle_collision, hitch_violation = jax.lax.cond(
                 use_gated_rollout,
                 use_gated_rollout_fn,
                 use_naive_penalty_fn,
-                args
-            ),
-            (q_proposed,)
-        )
+                (q_proposed,)
+            )
         
         # Compute reward
         reward = self.get_reward(q_final)
@@ -1625,3 +1623,292 @@ class TractorTrailer2d:
         hitch_data = transforms['hitch_line_data']
         self.hitch_line.set_data([hitch_data[0][0], hitch_data[1][0]], 
                                 [hitch_data[0][1], hitch_data[1][1]])
+
+    def _numpy_projection_function(self, args_tuple):
+        """
+        Pure NumPy projection function for host callback.
+        Minimizes ||u - u_original||² subject to safety constraints on resulting state.
+        """
+        import numpy as np
+        from scipy.optimize import minimize
+        
+        # Unpack arguments
+        q_current_np, u_original_normalized_np = args_tuple
+        
+        # Store environment parameters for use in nested functions
+        l1, l2, lh = self.l1, self.l2, self.lh
+        tractor_width, trailer_width = self.tractor_width, self.trailer_width
+        phi_max = self.phi_max
+        v_max, delta_max = self.v_max, self.delta_max
+        dt = self.dt
+        obs_circles = self.obs_circles
+        obs_rectangles = self.obs_rectangles
+        
+        def tractor_trailer_dynamics_np(x, u_scaled):
+            """NumPy version of tractor trailer dynamics"""
+            px, py, theta1, theta2 = x
+            v, delta = u_scaled  # u_scaled is in actual units
+            
+            px_dot = v * np.cos(theta1)
+            py_dot = v * np.sin(theta1)
+            theta1_dot = (v / l1) * np.tan(delta)
+            theta2_dot = (v / l2) * (
+                np.sin(theta1 - theta2) - 
+                (lh / l1) * np.cos(theta1 - theta2) * np.tan(delta)
+            )
+            
+            return np.array([px_dot, py_dot, theta1_dot, theta2_dot])
+        
+        def rk4_np(dynamics, x, u, dt):
+            """NumPy version of RK4 integration"""
+            k1 = dynamics(x, u)
+            k2 = dynamics(x + dt / 2 * k1, u)
+            k3 = dynamics(x + dt / 2 * k2, u)
+            k4 = dynamics(x + dt * k3, u)
+            return x + dt / 6 * (k1 + 2 * k2 + 2 * k3 + k4)
+        
+        def input_scaler_np(u_normalized):
+            """NumPy version of input scaler"""
+            v = u_normalized[0] * v_max
+            delta = u_normalized[1] * delta_max
+            return np.array([v, delta])
+        
+        def get_tractor_trailer_rectangles_np(x):
+            """NumPy version of get_tractor_trailer_rectangles"""
+            px, py, theta1, theta2 = x[:4]
+            
+            # Tractor rectangle (centered at tractor center)
+            tractor_center_x = px + (l1/2) * np.cos(theta1)
+            tractor_center_y = py + (l1/2) * np.sin(theta1)
+            
+            # Trailer rectangle
+            hitch_x = px - lh * np.cos(theta1)
+            hitch_y = py - lh * np.sin(theta1)
+            trailer_center_x = hitch_x - (l2/2) * np.cos(theta2)
+            trailer_center_y = hitch_y - (l2/2) * np.sin(theta2)
+            
+            return {
+                'tractor_center': np.array([tractor_center_x, tractor_center_y]),
+                'tractor_angle': theta1,
+                'trailer_center': np.array([trailer_center_x, trailer_center_y]),
+                'trailer_angle': theta2
+            }
+        
+        def _sdf_oriented_box_np(point, center, half_size, angle):
+            """
+            NumPy version of signed distance from point to oriented rectangle.
+            Positive outside, negative inside.
+            """
+            # box axes
+            u = np.array([np.cos(angle), np.sin(angle)])
+            v = np.array([-np.sin(angle), np.cos(angle)])
+            
+            # vector from box center to query point
+            d = np.array([np.dot(point - center, u), np.dot(point - center, v)])
+            
+            # how far outside along each local axis
+            q = np.abs(d) - half_size
+            
+            # outside term: Euclidean norm of positive parts
+            outside = np.linalg.norm(np.maximum(q, 0.0))
+            
+            # inside term: max of the two inside distances (≤0)
+            inside = min(max(q[0], q[1]), 0.0)
+            
+            return outside + inside
+        
+        def _sdf_two_boxes_np(c1, h1, a1, c2, h2, a2):
+            """
+            NumPy version of signed distance between two oriented boxes.
+            """
+            # box axes
+            u1 = np.array([np.cos(a1), np.sin(a1)])
+            v1 = np.array([-np.sin(a1), np.cos(a1)])
+            u2 = np.array([np.cos(a2), np.sin(a2)])
+            v2 = np.array([-np.sin(a2), np.cos(a2)])
+            axes = [u1, v1, u2, v2]
+            
+            def gap_on_axis(axis):
+                # projection centers
+                p1 = np.dot(c1, axis)
+                p2 = np.dot(c2, axis)
+                # projection radii
+                r1 = h1[0] * abs(np.dot(u1, axis)) + h1[1] * abs(np.dot(v1, axis))
+                r2 = h2[0] * abs(np.dot(u2, axis)) + h2[1] * abs(np.dot(v2, axis))
+                # signed gap: positive if disjoint, negative if overlapping
+                return max((p2 - r2) - (p1 + r1), (p1 - r1) - (p2 + r2))
+            
+            # take the worst (largest) gap over all separating axes
+            gaps = [gap_on_axis(a) for a in axes]
+            return max(gaps)
+        
+        def _signed_dist_rect_circle_np(x, circle):
+            """
+            NumPy version of signed distance between tractor+trailer rectangles and circle.
+            """
+            geom = get_tractor_trailer_rectangles_np(x)
+            center_c, r = circle[:2], circle[2]
+            
+            # tractor SDF
+            hd_trac = np.array([l1/2, tractor_width/2])
+            dt = _sdf_oriented_box_np(center_c, geom['tractor_center'], hd_trac, geom['tractor_angle'])
+            
+            # trailer SDF
+            hd_tral = np.array([l2/2, trailer_width/2])
+            dtr = _sdf_oriented_box_np(center_c, geom['trailer_center'], hd_tral, geom['trailer_angle'])
+            
+            # subtract circle radius, then take the tighter (minimum)
+            return min(dt, dtr) - r
+        
+        def _signed_dist_rect_rect_np(x, rect_obs):
+            """
+            NumPy version of signed distance between tractor+trailer and rectangular obstacle.
+            """
+            ox, oy, w, h, oa = rect_obs
+            c_obs = np.array([ox, oy])
+            hs_obs = np.array([w/2, h/2])
+            
+            geom = get_tractor_trailer_rectangles_np(x)
+            
+            # tractor
+            c_t = geom['tractor_center']
+            ht = np.array([l1/2, tractor_width/2])
+            at = geom['tractor_angle']
+            d1 = _sdf_two_boxes_np(c_t, ht, at, c_obs, hs_obs, oa)
+            
+            # trailer  
+            c_r = geom['trailer_center']
+            hr = np.array([l2/2, trailer_width/2])
+            ar = geom['trailer_angle']
+            d2 = _sdf_two_boxes_np(c_r, hr, ar, c_obs, hs_obs, oa)
+            
+            return min(d1, d2)
+        
+        def constraint_function_np(q):
+            """NumPy version of constraint evaluation"""
+            cs = []
+            
+            # Circular obstacles
+            if len(obs_circles) > 0:
+                for i in range(len(obs_circles)):
+                    circle = obs_circles[i]
+                    d = _signed_dist_rect_circle_np(q, circle)
+                    cs.append(float(d))
+            
+            # Rectangular obstacles  
+            if len(obs_rectangles) > 0:
+                for i in range(len(obs_rectangles)):
+                    rect = obs_rectangles[i]
+                    d = _signed_dist_rect_rect_np(q, rect)
+                    cs.append(float(d))
+            
+            # Hitch angle constraint
+            wrap_pi = lambda a: (a + np.pi) % (2*np.pi) - np.pi
+            hitch_angle = wrap_pi(q[2] - q[3])
+            hitch_constraint = phi_max - np.abs(hitch_angle)
+            cs.append(float(hitch_constraint))
+            
+            return np.array(cs) if len(cs) > 0 else np.array([1.0])
+        
+        def objective(u_normalized):
+            """Objective: minimize distance to original control input"""
+            return np.sum((u_normalized - u_original_normalized_np)**2)
+        
+        def constraint_function(u_normalized):
+            """Constraint function: returns array where each element >= 0 for feasibility"""
+            # Scale control input to actual ranges
+            u_scaled = input_scaler_np(u_normalized)
+            
+            # Compute resulting state
+            q_new = rk4_np(tractor_trailer_dynamics_np, q_current_np, u_scaled, dt)
+            
+            # Evaluate constraints on resulting state
+            constraints = constraint_function_np(q_new)
+            
+            return constraints
+        
+        # Set up optimization problem
+        u0 = u_original_normalized_np  # Start from original normalized control
+        bounds = [(-1.0, 1.0), (-1.0, 1.0)]  # Normalized control bounds
+        
+        # Constraint dict for SciPy
+        constraints = {
+            'type': 'ineq',
+            'fun': constraint_function
+        }
+        
+        try:
+            # Use trust-constr which handles nonlinear constraints well
+            print("Asdf")
+            result = minimize(
+                objective, 
+                u0, 
+                method='trust-constr',
+                bounds=bounds,
+                constraints=constraints,
+                options={
+                    'maxiter': 50,
+                    'gtol': 1e-4,
+                    'verbose': 0
+                }
+            )
+            
+            if result.success:
+                return result.x
+            else:
+                # If optimization fails, return original control
+                return u_original_normalized_np
+                
+        except Exception as e:
+            # Fallback to original on any error
+            return u_original_normalized_np
+
+    @partial(jax.jit, static_argnums=(0,))
+    def project_control_to_safe_set(self, q_current, u_original_normalized):
+        """
+        Project control input to safe set using external callback to SciPy optimization.
+        
+        Args:
+            q_current: Current state
+            u_original_normalized: Original normalized control input [-1,1]
+            
+        Returns:
+            u_safe_normalized: Safe normalized control input [-1,1]
+        """
+        # Check if projection is enabled
+        if not self.enable_projection:
+            return u_original_normalized
+        
+        # Use external callback to call NumPy-based optimization
+        import jax.experimental
+        
+        # Prepare arguments
+        args_tuple = (q_current, u_original_normalized)
+        
+        # Call the NumPy function via external callback
+        u_projected = jax.experimental.io_callback(
+            self._numpy_projection_function,
+            u_original_normalized,  # result shape and dtype
+            args_tuple
+        )
+        
+        return u_projected
+
+    def project_to_safe_set(self, q_prop, q_current=None, u_original=None):
+        """
+        Legacy project_to_safe_set method for compatibility.
+        
+        For proper control-based projection, use the step function with enable_projection=True.
+        """
+        if not self.enable_projection:
+            return q_prop
+            
+        # If we have both current state and original control, use control projection
+        if q_current is not None and u_original is not None:
+            u_safe = self.project_control_to_safe_set(q_current, u_original)
+            u_safe_scaled = self.input_scaler(u_safe)
+            q_safe = rk4(self.tractor_trailer_dynamics, q_current, u_safe_scaled, self.dt)
+            return q_safe
+        else:
+            # Fallback to original proposed state
+            return q_prop

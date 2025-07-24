@@ -65,10 +65,10 @@ class MBDConfig:
     motion_preference: int = 0  # 0=none, 1=forward, -1=backward
     # collision handling
     collision_penalty: float = 0.15  # penalty applied for obstacle collisions
-    enable_gated_rollout_collision: bool = False  # whether to use gated rollout for obstacle collision
+    enable_gated_rollout_collision: bool = True  # whether to use gated rollout for obstacle collision
     hitch_penalty: float = 0.10  # penalty applied for hitch angle violations
-    enable_gated_rollout_hitch: bool = False  # whether to use gated rollout for hitch violation
-    enable_projection: bool = True  # whether to use projection to safe set
+    enable_gated_rollout_hitch: bool = True  # whether to use gated rollout for hitch violation
+    enable_projection: bool = False  # whether to use projection to safe set
     # physical parameters
     l1: float = 3.23  # tractor wheelbase
     l2: float = 2.9   # trailer length
@@ -571,9 +571,9 @@ def run_diffusion(args=None, env=None):
         
         plt.switch_backend('TkAgg')  # Switch to interactive backend
         plt.draw()  # Ensure the plot is fully rendered
-        plt.show()  # Show blocking so user can examine the static plot
-        
         plt.savefig(f"{path}/rollout.png")
+        plt.savefig(f"{path}/rollout.svg")
+        plt.show()  # Show blocking so user can examine the static plot
         
         # Close the static plot before showing animations
         if args.show_animation or args.save_denoising_animation:
@@ -693,5 +693,5 @@ if __name__ == "__main__":
         env.set_goal_pos(theta1=jnp.pi/2, theta2=jnp.pi/2)  # backward parking
     
     rew_final, Y0, trajectory_states, timing_info = run_diffusion(args=config, env=env)
-    print(f"final trajectory: {trajectory_states}")
+    #print(f"final trajectory: {trajectory_states}")
     end_time = time.time()
