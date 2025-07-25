@@ -1043,144 +1043,6 @@ class TractorTrailer2d:
         hitch_violation = self.check_hitch_violation(x)
         return obstacle_collision | hitch_violation
 
-    # ================================================================
-    # PROJECTION-RELATED FUNCTIONS
-    # ================================================================
-
-    @partial(jax.jit, static_argnums=(0,))
-    def _sdf_oriented_box(self, point, center, half_size, angle):
-        """
-        Signed distance from `point` to an oriented rectangle:
-          half_size = [half_length, half_width]
-          angle ∈ ℝ is the box's rotation about its center.
-        Positive outside, negative inside.
-        """
-        # box axes
-        u = jnp.array([jnp.cos(angle),  jnp.sin(angle)])
-        v = jnp.array([-jnp.sin(angle), jnp.cos(angle)])
-        # vector from box center to query point
-        d = jnp.stack([jnp.dot(point - center, u),
-                       jnp.dot(point - center, v)])
-        # how far outside along each local axis
-        q = jnp.abs(d) - half_size
-        # outside term: Euclidean norm of positive parts
-        outside = jnp.linalg.norm(jnp.maximum(q, 0.0))
-        # inside term: max of the two inside distances (≤0)
-        inside = jnp.minimum(jnp.maximum(q[0], q[1]), 0.0)
-        return outside + inside
-
-    @partial(jax.jit, static_argnums=(0,))
-    def _signed_dist_rect_circle(self, x, circle):
-        """
-        Returns signed distance between the *union* of tractor+trailer
-        rectangles at state x, and a circle obstacle.
-        circle = [cx, cy, radius].
-        """
-        geom = self.get_tractor_trailer_rectangles(x)
-        center_c, r = circle[:2], circle[2]
-
-        # tractor SDF
-        hd_trac = jnp.array([self.l1/2, self.tractor_width/2])
-        dt = self._sdf_oriented_box(center_c,
-                               geom['tractor_center'],
-                               hd_trac,
-                               geom['tractor_angle'])
-        # trailer SDF
-        hd_tral = jnp.array([self.l2/2, self.trailer_width/2])
-        dtr = self._sdf_oriented_box(center_c,
-                                geom['trailer_center'],
-                                hd_tral,
-                                geom['trailer_angle'])
-        # subtract circle radius, then take the tighter (minimum)
-        return jnp.minimum(dt, dtr) - r
-
-    @partial(jax.jit, static_argnums=(0,))
-    def _sdf_two_boxes(self, c1, h1, a1, c2, h2, a2):
-        """
-        Signed distance between two oriented boxes A and B:
-        c1,h1,a1 = center, half‐sizes, angle of box A
-        c2,h2,a2 = same for box B.
-        """
-        # box axes
-        u1 = jnp.array([jnp.cos(a1),  jnp.sin(a1)])
-        v1 = jnp.array([-jnp.sin(a1), jnp.cos(a1)])
-        u2 = jnp.array([jnp.cos(a2),  jnp.sin(a2)])
-        v2 = jnp.array([-jnp.sin(a2), jnp.cos(a2)])
-        axes = [u1, v1, u2, v2]
-
-        def gap_on_axis(axis):
-            # projection centers
-            p1 = jnp.dot(c1, axis)
-            p2 = jnp.dot(c2, axis)
-            # projection radii
-            r1 = h1[0]*jnp.abs(jnp.dot(u1, axis)) + h1[1]*jnp.abs(jnp.dot(v1, axis))
-            r2 = h2[0]*jnp.abs(jnp.dot(u2, axis)) + h2[1]*jnp.abs(jnp.dot(v2, axis))
-            # signed gap: positive if disjoint, negative if overlapping
-            return jnp.maximum((p2 - r2) - (p1 + r1),
-                               (p1 - r1) - (p2 + r2))
-
-        # take the worst (largest) gap over all separating axes
-        gaps = jnp.stack([gap_on_axis(a) for a in axes])
-        return jnp.max(gaps)
-
-    @partial(jax.jit, static_argnums=(0,))
-    def _signed_dist_rect_rect(self, x, rect_obs):
-        """
-        Signed distance between the *union* of tractor+trailer
-        and a single rectangular obstacle.
-        rect_obs = [ox, oy, width, height, angle].
-        """
-        ox, oy, w, h, oa = rect_obs
-        c_obs  = jnp.array([ox, oy])
-        hs_obs = jnp.array([w/2, h/2])
-
-        geom = self.get_tractor_trailer_rectangles(x)
-        # tractor
-        c_t, ht, at = geom['tractor_center'], jnp.array([self.l1/2, self.tractor_width/2]), geom['tractor_angle']
-        d1 = self._sdf_two_boxes(c_t, ht, at, c_obs, hs_obs, oa)
-        # trailer
-        c_r, hr, ar = geom['trailer_center'], jnp.array([self.l2/2, self.trailer_width/2]), geom['trailer_angle']
-        d2 = self._sdf_two_boxes(c_r, hr, ar, c_obs, hs_obs, oa)
-
-        return jnp.minimum(d1, d2)
-
-    @partial(jax.jit, static_argnums=(0,))
-    def _projection_constraints(self, x):
-        """Returns inequality constraints c_i(x) >= 0 for safe set"""
-        cs = []
-        
-        # Only use first few circular obstacles (most critical ones)
-        if self.obs_circles.shape[0] > 0:
-            for i in range(self.obs_circles.shape[0]):
-                circle = self.obs_circles[i]
-                d = self._signed_dist_rect_circle(x, circle)
-                # Simple finite check
-                d = jnp.where(jnp.isfinite(d), d, 100.0)
-                cs.append(d)
-        
-        # Use all rectangular obstacles (usually few)
-        if self.obs_rectangles.shape[0] > 0:
-            for i in range(self.obs_rectangles.shape[0]):
-                rect = self.obs_rectangles[i]
-                d = self._signed_dist_rect_rect(x, rect)
-                # Simple finite check
-                d = jnp.where(jnp.isfinite(d), d, 100.0)
-                cs.append(d)
-        
-        # Hitch angle constraint (simplified)
-        wrap_pi = lambda a: (a + jnp.pi) % (2*jnp.pi) - jnp.pi
-        hitch_angle = wrap_pi(x[2] - x[3])
-        hitch_constraint = self.phi_max - jnp.abs(hitch_angle)
-        cs.append(hitch_constraint)
-        
-        # Simple array creation
-        if len(cs) == 0:
-            return jnp.array([1.0])  # No constraints means always safe
-        else:
-            return jnp.array(cs)
-
-
-
     def eval_xref_logpd(self, xs, motion_preference=None):
         """Evaluate log probability density with respect to reference trajectory"""
         # Check if reference trajectory is set
@@ -1817,6 +1679,9 @@ class TractorTrailer2d:
         safety_margin = 2.0  # Safety margin around obstacles
         
         # Penalty for circular obstacles (simple point-to-circle distance)
+        # NOTE: There is no straightforward method to compute differentiable SDF between a non-convex and disjoint polygon
+        #       and disjoint polygons. So, simply apply a simple point-to-circle distance penalty.
+        #       Also, ignore the rectangular obstacles for here.
         if self.obs_circles.shape[0] > 0:
             for i in range(self.obs_circles.shape[0]):
                 circle = self.obs_circles[i]
@@ -1833,27 +1698,7 @@ class TractorTrailer2d:
                 
                 # Add squared penalties
                 total_cost += tractor_violation ** 2 + trailer_violation ** 2
-        
-        # Penalty for rectangular obstacles (simple point-to-center distance)
-        # if self.obs_rectangles.shape[0] > 0:
-        #     for i in range(self.obs_rectangles.shape[0]):
-        #         rect = self.obs_rectangles[i]
-        #         rect_center = rect[:2]
-        #         rect_size = jnp.maximum(rect[2], rect[3])  # Use max of width/height as rough radius
-                
-        #         # Distance from tractor to rectangle center
-        #         tractor_dist = jnp.linalg.norm(tractor_pos - rect_center)
-        #         tractor_violation = jnp.maximum(0.0, rect_size/2 + safety_margin - tractor_dist)
-                
-        #         # Distance from trailer to rectangle center
-        #         trailer_dist = jnp.linalg.norm(trailer_pos - rect_center)
-        #         trailer_violation = jnp.maximum(0.0, rect_size/2 + safety_margin - trailer_dist)
-                
-        #         # Add squared penalties
-        #         total_cost += tractor_violation ** 2 + trailer_violation ** 2
-        
-        # Improved hitch angle penalty - more differentiable and properly weighted
-        # Instead of wrap_pi which has discontinuous gradients, use a smooth penalty
+    
         hitch_angle_raw = theta1 - theta2
         
         # Use multiple periodic penalties to handle angle wrapping smoothly
@@ -1880,7 +1725,7 @@ class TractorTrailer2d:
         return total_cost
 
     @partial(jax.jit, static_argnums=(0, 3))  # Make max_steps static (position 3)
-    def apply_guidance(self, q_proposed, step_size=0.1, max_steps=1):
+    def apply_guidance(self, q_proposed, step_size=0.05, max_steps=5):
         """
         Apply gradient descent guidance to move the proposed state away from constraint violations.
         

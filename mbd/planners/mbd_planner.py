@@ -102,9 +102,9 @@ class MBDConfig:
     ref_theta2_weight: float = 0.1 # theta2 weight in demo evaluation
     # animation
     render: bool = True
-    save_animation: bool = False # flag to enable animation saving
+    save_animation: bool = True # flag to enable animation saving
     show_animation: bool = True  # flag to show animation during creation
-    save_denoising_animation: bool = False  # flag to enable denoising process visualization
+    save_denoising_animation: bool = True  # flag to enable denoising process visualization
     frame_skip: int = 1  # skip every other frame for denoising animation
     dt: float = 0.25
 
@@ -797,7 +797,7 @@ if __name__ == "__main__":
     # Set initial position using geometric parameters relative to parking lot
     # dx: distance from tractor front face to target parking space center
     # dy: distance from tractor to parking lot entrance line
-    env.set_init_pos(dx=-5.0, dy=2.0, theta1=0, theta2=0)
+    env.set_init_pos(dx=2.0, dy=1.0, theta1=0, theta2=0)
     if config.motion_preference == -2:
         env.set_init_pos(dx=-12.0, dy=1.0, theta1=jnp.pi, theta2=jnp.pi)
     # Set goal angles based on motion preference
