@@ -118,6 +118,11 @@ class AccTractorTrailer2d(TractorTrailer2d):
     @partial(jax.jit, static_argnums=(0,))
     def step(self, state: State, action: jax.Array) -> State:
         """Run one timestep of the environment's dynamics."""
+        return self._step_internal(state, action, self.visualization_mode)
+    
+    @partial(jax.jit, static_argnums=(0, 3))  # visualization_mode is static argument 3
+    def _step_internal(self, state: State, action: jax.Array, visualization_mode: bool) -> State:
+        """Internal step function with explicit visualization_mode parameter."""
         action = jnp.clip(action, -1.0, 1.0)
         
         # Scale inputs from normalized [-1, 1] to actual ranges
@@ -125,66 +130,93 @@ class AccTractorTrailer2d(TractorTrailer2d):
         
         q = state.pipeline_state
         
-        # Conditionally use gated rollout or simple forward step based on configuration
-        use_gated_rollout = self.enable_gated_rollout_collision | self.enable_gated_rollout_hitch
+        # Handle projection case separately to avoid vmap-of-cond + io_callback issue
+        if self.enable_projection:
+            # Use control-based projection: optimize control input, then compute resulting state
+            u_safe_normalized = self.project_control_to_safe_set(q, action)  # action is normalized
+            u_safe_scaled = self.input_scaler(u_safe_normalized)  # Scale to actual ranges
+            q_final = rk4(self.tractor_trailer_dynamics, q, u_safe_scaled, self.dt)
+            q_reward = q_final  # For projection, q_reward = q_final
+            obstacle_collision = False  # Guaranteed safe by projection
+            hitch_violation = False     # Guaranteed safe by projection
+        elif self.enable_guidance:
+            # Use guidance: compute proposed state, apply guidance for reward computation
+            q_proposed = rk4(self.tractor_trailer_dynamics, q, u_scaled, self.dt)
+            q_reward = self.apply_guidance(q_proposed)  # Guided state for reward computation
+            
+            # During denoising: use q_proposed for kinematic consistency
+            # During visualization: use q_reward to show actual guided trajectory
+            q_final = q_reward if visualization_mode else q_proposed
+            
+            # Collision flags are handled by guidance, not through naive penalty
+            obstacle_collision = False  # constraints are handled by guidance, not through naive penalty
+            hitch_violation = False     # constraints are handled by guidance, not through naive penalty
+        else:
+            # Use original conditional logic for non-projection/non-guidance methods
+            q_proposed = rk4(self.tractor_trailer_dynamics, q, u_scaled, self.dt)
+            
+            def use_gated_rollout_fn(args):
+                q_prop, = args
+                return self._step_with_gated_rollout((q, q_prop))
+            
+            def use_naive_penalty_fn(args):
+                q_prop, = args
+                return self._step_without_gated_rollout(q_prop)
+            
+            # Select method based on gated rollout flags
+            use_gated_rollout = self.enable_gated_rollout_collision | self.enable_gated_rollout_hitch
+            
+            q_final, obstacle_collision, hitch_violation = jax.lax.cond(
+                use_gated_rollout,
+                use_gated_rollout_fn,
+                use_naive_penalty_fn,
+                (q_proposed,)
+            )
+            q_reward = q_final  # For other methods, q_reward = q_final
         
-        q_final, obstacle_collision, hitch_violation = jax.lax.cond(
-            use_gated_rollout,
-            self._step_with_gated_rollout,
-            self._step_without_gated_rollout,
-            (q, u_scaled)
-        )
-        
-        # Compute reward using only position/angle states
-        reward = self.get_reward(q_final[:4])
+        # Compute reward on q_reward (the state we want to evaluate)
+        reward = self.get_reward(q_reward[:4])  # Use first 4 elements for kinematic reward
         
         # Apply penalties using flags (only if violations were checked)
         reward = jnp.where(obstacle_collision, reward - self.collision_penalty, reward)
         reward = jnp.where(hitch_violation, reward - self.hitch_penalty, reward)
         
-        # Add preference penalty based on motion direction (use state velocity)
+        # Add preference penalty based on motion direction (use final state and control)
         preference_penalty = self.get_preference_penalty(q_final, u_scaled)
         has_preference = self.motion_preference != 0
         reward = jnp.where(has_preference, reward - preference_penalty, reward)
         
+        # Return q_final as the next state (ensures kinematic consistency)
         return state.replace(pipeline_state=q_final, obs=q_final, reward=reward, done=0.0)
 
     @partial(jax.jit, static_argnums=(0,))
     def _step_with_gated_rollout(self, data):
         """Step function with gated rollout enabled"""
-        q, u_scaled = data
-        return self.gated_rollout(q, u_scaled)
+        q, q_proposed = data
+        return self.gated_rollout(q, q_proposed)
     
     @partial(jax.jit, static_argnums=(0,))
-    def _step_without_gated_rollout(self, data):
+    def _step_without_gated_rollout(self, q_proposed):
         """Step function with simple forward dynamics (no gated rollout)"""
-        q, u_scaled = data
+        # Check collision and hitch violations on q_proposed (for penalty computation)
+        obstacle_collision = self.check_obstacle_collision(q_proposed[:4], self.obs_circles, self.obs_rectangles)
+        hitch_violation = self.check_hitch_violation(q_proposed[:4])
         
-        # Simple forward propagate one step
-        q_new = rk4(self.tractor_trailer_dynamics, q, u_scaled, self.dt)
-        
-        # Check collision and hitch violations on q_new (for penalty computation)
-        obstacle_collision = self.check_obstacle_collision(q_new[:4], self.obs_circles, self.obs_rectangles)
-        hitch_violation = self.check_hitch_violation(q_new[:4])
-        
-        return q_new, obstacle_collision, hitch_violation
+        return q_proposed, obstacle_collision, hitch_violation
 
     @partial(jax.jit, static_argnums=(0,))
-    def gated_rollout(self, q, u):
+    def gated_rollout(self, q, q_proposed):
         """
         Gated rollout for acceleration dynamics with correct safety checking logic.
         
         Logic:
-        1. Always do one step forward → q_new (this is what we want to update to)
+        1. Use pre-computed q_proposed as the desired next state
         2. If velocity is high, do additional rollout until stop → q_candidate_final (for safety checking only)
-        3. Check safety during the entire rollout (from q_new to q_candidate_final)
-        4. If safe → return q_new; if unsafe → return q (stick to previous state)
+        3. Check safety during the entire rollout (from q_proposed to q_candidate_final)
+        4. If safe → return q_proposed; if unsafe → return q (stick to previous state)
         """
-        px, py, theta1, theta2, v, delta = q
-        a, omega = u
-        
-        # Step 1: Always do one step forward (this is the desired next state)
-        q_new = rk4(self.tractor_trailer_dynamics, q, u, self.dt)
+        # Step 1: Use pre-computed proposed state (already computed via RK4 in step function)
+        q_new = q_proposed
         
         # Step 2: Check if we need additional rollout for safety checking
         v_new = q_new[4]
@@ -257,6 +289,65 @@ class AccTractorTrailer2d(TractorTrailer2d):
         )
         
         return obstacle_collision_any, hitch_violation_any
+
+    @partial(jax.jit, static_argnums=(0,))
+    def project_to_safe_set(self, q_prop):
+        """
+        Project 6D proposed state to safe set using parent 4D projection functions.
+        Only the first 4 elements (position/angle) are constrained for safety.
+        """
+        # Check if projection is enabled (via parent class)
+        if not self.enable_projection:
+            # If projection is disabled, just return the proposed state
+            return q_prop
+        
+        # Extract first 4 elements (position/angle states)
+        q_4d = q_prop[:4]
+        
+        # Project 4D state to safe set using parent function
+        q_4d_safe = super().project_to_safe_set(q_4d)
+        
+        # Reconstruct 6D state by keeping velocity and steering unchanged
+        q_safe = jnp.concatenate([q_4d_safe, q_prop[4:]])
+        
+        return q_safe
+
+    @partial(jax.jit, static_argnums=(0,))
+    def project_control_to_safe_set(self, q_current, u_original_normalized):
+        """
+        Project control input to safe set for 6D acceleration dynamics.
+        Uses parent class method with first 4 elements (position and angles).
+        """
+        if not self.enable_projection:
+            return u_original_normalized
+            
+        # Extract first 4 elements for kinematic projection
+        q_kinematic = q_current[:4]
+        
+        # Use parent class projection method
+        u_projected = super().project_control_to_safe_set(q_kinematic, u_original_normalized)
+        
+        return u_projected
+
+    @partial(jax.jit, static_argnums=(0, 3))  # Make max_steps static
+    def apply_guidance(self, q_proposed, step_size=0.05, max_steps=5):
+        """
+        Apply gradient descent guidance for 6D acceleration dynamics.
+        Uses parent class method with first 4 elements (position and angles).
+        """
+        if not self.enable_guidance:
+            return q_proposed
+            
+        # Extract first 4 elements for kinematic guidance
+        q_kinematic = q_proposed[:4]
+        
+        # Apply guidance to kinematic state
+        q_guided_kinematic = super().apply_guidance(q_kinematic, step_size, max_steps)
+        
+        # Reconstruct 6D state with guided kinematic part and unchanged velocity/steering
+        q_guided = jnp.concatenate([q_guided_kinematic, q_proposed[4:]])
+        
+        return q_guided
 
     def get_preference_penalty(self, x, u):
         """

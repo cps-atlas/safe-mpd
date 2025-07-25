@@ -6,6 +6,8 @@ import subprocess
 import numpy as np
 from matplotlib import pyplot as plt
 from matplotlib.transforms import Affine2D
+from matplotlib.patches import Patch, Rectangle
+from matplotlib.legend_handler import HandlerPatch
 from tqdm import tqdm
 import mbd
 
@@ -116,8 +118,16 @@ def export_video(env_name, animation_type="trajectory", video_name=None):
         print(f"FFmpeg failed with return code: {result}")
 
 
-def create_animation(env, trajectory_states, trajectory_actions, args):
-    """Create animation of the tractor-trailer trajectory"""
+def create_animation(env, trajectory_states, trajectory_actions, args, guided_trajectory_overlay=None):
+    """Create animation of the tractor-trailer trajectory
+    
+    Args:
+        env: Environment object
+        trajectory_states: Main trajectory states for vehicle animation (usually unguided for guidance case)
+        trajectory_actions: Actions corresponding to trajectory states  
+        args: Configuration arguments
+        guided_trajectory_overlay: Optional guided trajectory states to overlay as path
+    """
     print("Creating animation...")
     
     # Setup animation saving if enabled
@@ -233,27 +243,105 @@ def create_animation(env, trajectory_states, trajectory_actions, args):
     env.setup_animation_patches(ax)
     
     # Add trajectory trace
-    trajectory_line, = ax.plot([], [], 'b-', alpha=0.8, linewidth=3, label='Trajectory', zorder=4)
+    if guided_trajectory_overlay is not None:
+        trajectory_line, = ax.plot([], [], 'b-', alpha=0.8, linewidth=3, label='Unguided trajectory', zorder=4)
+    else:
+        trajectory_line, = ax.plot([], [], 'b-', alpha=0.8, linewidth=3, label='Trajectory', zorder=4)
     
-    ax.legend()
+    # Add guided trajectory overlay if provided
+    guided_trajectory_line = None
+    if guided_trajectory_overlay is not None:
+        guided_trajectory_line, = ax.plot([], [], 'r--', alpha=0.8, linewidth=2, 
+                                        label='Guided trajectory', zorder=3)
+    
+    # Add violation markers to legend using colored squares
+    # Create square patches for violation markers
+    collision_patch = Rectangle((0, 0), 1, 1, facecolor='#FF3C3C', edgecolor='#FF3C3C', linewidth=0.5)
+    jackknife_patch = Rectangle((0, 0), 1, 1, facecolor='#CC00FF', edgecolor='#CC00FF', linewidth=0.5)
+    
+    # Custom handler to ensure squares remain square in legend
+    class SquareHandler(HandlerPatch):
+        def create_artists(self, legend, orig_handle, xdescent, ydescent, width, height, fontsize, trans):
+            # Make it square by using the smaller of width/height
+            size = min(width, height)
+            # Center the square
+            x_offset = (width - size) / 2
+            y_offset = (height - size) / 2
+            
+            square = Rectangle((x_offset, y_offset), size, size, 
+                             facecolor=orig_handle.get_facecolor(),
+                             edgecolor=orig_handle.get_edgecolor(),
+                             linewidth=orig_handle.get_linewidth(),
+                             transform=trans)
+            return [square]
+    
+    # Get existing legend handles and labels
+    handles, labels = ax.get_legend_handles_labels()
+    
+    # Add violation markers to legend
+    handles.extend([collision_patch, jackknife_patch])
+    labels.extend(['Collision', 'Jackknifing'])
+    
+    # Create legend with custom handler for square patches
+    legend = ax.legend(handles, labels, 
+                      handler_map={collision_patch: SquareHandler(), 
+                                  jackknife_patch: SquareHandler()})
     fig.tight_layout()
     
     # Animation loop
     traj_x = []
     traj_y = []
+    guided_traj_x = []
+    guided_traj_y = []
+    violation_markers = []  # Store references to exclamation mark text objects
     
     for frame_idx, (state, action) in enumerate(zip(trajectory_states, trajectory_actions)):
         # Convert jax arrays to numpy for matplotlib
         state_np = np.array(state)
         action_np = np.array(action) if action is not None else None
         
+        # Clear previous violation markers
+        for marker in violation_markers:
+            marker.remove()
+        violation_markers.clear()
+        
         # Update robot visualization
         env.update_animation_patches(state_np, action_np)
+        
+        state_4d = state_np[:4]
+        
+        # Check obstacle collision
+        obstacle_collision = env.check_obstacle_collision(state_4d, env.obs_circles, env.obs_rectangles)
+        
+        # Check hitch angle violation
+        hitch_violation = env.check_hitch_violation(state_4d)
+        
+        # Add exclamation marks for violations
+        current_position = state_np[:2]
+        
+        if obstacle_collision:
+            marker = ax.text(current_position[0] + 2.0, current_position[1] + 0.5, 
+                           '!', color='#FF3C3C', weight='bold', fontsize=32, 
+                           ha='center', va='center', zorder=10)
+            violation_markers.append(marker)
+        
+        if hitch_violation:
+            marker = ax.text(current_position[0] + 3.0, current_position[1] + 0.5, 
+                           '!', color='#CC00FF', weight='bold', fontsize=32, 
+                           ha='center', va='center', zorder=10)
+            violation_markers.append(marker)
         
         # Update trajectory trace
         traj_x.append(state_np[0])
         traj_y.append(state_np[1])
         trajectory_line.set_data(traj_x, traj_y)
+        
+        # Update guided trajectory overlay progressively if provided
+        if guided_trajectory_line is not None and frame_idx < len(guided_trajectory_overlay):
+            guided_state = guided_trajectory_overlay[frame_idx]
+            guided_traj_x.append(guided_state[0])
+            guided_traj_y.append(guided_state[1])
+            guided_trajectory_line.set_data(guided_traj_x, guided_traj_y)
         
         # Update plot
         if args.show_animation:
@@ -265,6 +353,11 @@ def create_animation(env, trajectory_states, trajectory_actions, args):
         if args.save_animation:
             frame_filename = f"{animation_path}/frame_{frame_idx:04d}.png"
             plt.savefig(frame_filename, dpi=100, bbox_inches='tight')
+    
+    # Clear any remaining violation markers
+    for marker in violation_markers:
+        marker.remove()
+    violation_markers.clear()
     
     # Show final result
     if args.show_animation:

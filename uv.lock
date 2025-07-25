@@ -828,6 +828,7 @@ source = { editable = "." }
 dependencies = [
     { name = "control" },
     { name = "distrax" },
+    { name = "flax" },
     { name = "gputil" },
     { name = "gym" },
     { name = "gymnax" },
@@ -847,6 +848,7 @@ dependencies = [
 requires-dist = [
     { name = "control" },
     { name = "distrax" },
+    { name = "flax", specifier = ">=0.10.7" },
     { name = "gputil" },
     { name = "gym" },
     { name = "gymnax" },
