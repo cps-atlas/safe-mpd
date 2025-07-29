@@ -106,9 +106,9 @@ class MBDConfig:
     ref_theta2_weight: float = 0.1 # theta2 weight in demo evaluation
     # animation
     render: bool = True
-    save_animation: bool = False # flag to enable animation saving
+    save_animation: bool = True # flag to enable animation saving
     show_animation: bool = True  # flag to show animation during creation
-    save_denoising_animation: bool = False  # flag to enable denoising process visualization
+    save_denoising_animation: bool = True # flag to enable denoising process visualization
     frame_skip: int = 1  # skip every other frame for denoising animation
     dt: float = 0.25
 
@@ -647,18 +647,18 @@ def run_diffusion(args=None, env=None):
         if args.enable_guidance and unguided_trajectory_states is not None:
             # Use unguided trajectory for vehicle visualization (kinematically feasible)
             env.render(ax, unguided_trajectory_states)
-            ax.plot(unguided_trajectory_states[:, 0], unguided_trajectory_states[:, 1], "b-", 
-                   linewidth=2, label="Unguided trajectory (kinematically feasible)", alpha=0.8)
+            # ax.plot(unguided_trajectory_states[:, 0], unguided_trajectory_states[:, 1], "b-", 
+            #        linewidth=2, label="Unguided trajectory", alpha=0.8)
             
             # Plot guided trajectory separately to show discrepancy
             guided_trajectory = trajectory_states  # This was computed with guidance
-            ax.plot(guided_trajectory[:, 0], guided_trajectory[:, 1], "r--", 
-                   linewidth=2, label="Guided trajectory (reward-optimized)", alpha=0.8)
+            ax.plot(guided_trajectory[:, 0], guided_trajectory[:, 1], "b--", 
+                   linewidth=2, label="Guidance on final trajectory", alpha=0.8)
             
-            # Add legend entry for guidance comparison
-            ax.text(0.02, 0.98, f"Guidance enabled: Showing both trajectories", 
-                   transform=ax.transAxes, fontsize=10, verticalalignment='top',
-                   bbox=dict(boxstyle="round,pad=0.3", facecolor="lightblue", alpha=0.7))
+            # # Add legend entry for guidance comparison
+            # ax.text(0.02, 0.98, f"Guidance enabled: Showing both trajectories", 
+            #        transform=ax.transAxes, fontsize=10, verticalalignment='top',
+            #        bbox=dict(boxstyle="round,pad=0.3", facecolor="lightblue", alpha=0.7))
         else:
             # Standard rendering for other methods
             env.render(ax, trajectory_states)
@@ -667,9 +667,7 @@ def run_diffusion(args=None, env=None):
         if args.enable_demo and hasattr(env, 'xref') and env.xref is not None:
             ax.plot(env.xref[:, 0], env.xref[:, 1], "g--", linewidth=2, label="Demonstration path", alpha=0.7)
         
-        ax.legend()
-        ax.set_title(f"MBD Planner Result ({'with Guidance' if args.enable_guidance else 'without Guidance'})")
-        
+        ax.legend()        
         plt.switch_backend('TkAgg')  # Switch to interactive backend
         plt.draw()  # Ensure the plot is fully rendered
         plt.savefig(f"{path}/rollout.png")
@@ -742,7 +740,7 @@ def run_diffusion(args=None, env=None):
     logging.debug(f"Final reward:            {rew_final:.3e}")
     logging.debug("=====================")
 
-    return rew_final, Y0, trajectory_states, timing_info, unguided_trajectory_states
+    return rew_final, Y0, trajectory_states, timing_info
 
 
 
@@ -819,6 +817,6 @@ if __name__ == "__main__":
     if config.motion_preference in [-1, -2]:  # backward parking
         env.set_goal_pos(theta1=jnp.pi/2, theta2=jnp.pi/2)  # backward parking
     
-    rew_final, Y0, trajectory_states, timing_info, unguided_trajectory_states = run_diffusion(args=config, env=env)
+    rew_final, Y0, trajectory_states, timing_info = run_diffusion(args=config, env=env)
     #print(f"final trajectory: {trajectory_states}")
     end_time = time.time()
