@@ -43,7 +43,7 @@ class TractorTrailer2d:
     def __init__(self, x0=None, xg=None, env_config=None, case="case1", dt=0.2, H=50, motion_preference=0, 
                  collision_penalty=0.15, enable_collision_projection=False, hitch_penalty=0.10, 
                  enable_hitch_projection=True, reward_threshold=25.0, ref_reward_threshold=5.0,
-                 max_w_theta=0.75, hitch_angle_weight=0.2, l1=3.23, l2=2.9, lh=1.15, 
+                 max_w_theta=0.75, hitch_angle_weight=0.2, l1=3.23, l2=2.9, lh=1.15, lf1=1.0, lr=1.0, lf2=1.0, lr2=1.0, 
                  tractor_width=2.0, trailer_width=2.5, v_max=3.0, delta_max_deg=55.0,
                  d_thr_factor=1.0, k_switch=2.5, steering_weight=0.05, preference_penalty_weight=0.05,
                  heading_reward_weight=0.5, terminal_reward_threshold=10.0, terminal_reward_weight=1.0, ref_pos_weight=0.3, ref_theta1_weight=0.5, ref_theta2_weight=0.2):
@@ -75,6 +75,10 @@ class TractorTrailer2d:
         self.l1 = l1  # tractor wheelbase
         self.l2 = l2   # trailer length
         self.lh = lh  # hitch length
+        self.lf1 = lf1
+        self.lr = lr
+        self.lf2 = lf2
+        self.lr2 = lr2
         self.tractor_width = tractor_width
         self.trailer_width = trailer_width
         
@@ -749,11 +753,11 @@ class TractorTrailer2d:
         px, py, theta1, theta2 = x
         
         # Tractor rectangle (centered at tractor center)
-        tractor_center_x = px + (self.l1/2) * jnp.cos(theta1)
-        tractor_center_y = py + (self.l1/2) * jnp.sin(theta1)
-        
+        tractor_center_x = px + 0.5 * (self.l1 + self.lf1 - self.lr) * jnp.cos(theta1)
+        tractor_center_y = py + 0.5 * (self.l1 + self.lf1 - self.lr) * jnp.sin(theta1)
+
         # Tractor corners in local coordinates (before rotation)
-        tractor_half_length = self.l1 / 2
+        tractor_half_length = (self.l1 + self.lf1 + self.lr) / 2
         tractor_half_width = self.tractor_width / 2
         tractor_local_corners = jnp.array([
             [-tractor_half_length, -tractor_half_width],  # rear left
@@ -770,11 +774,11 @@ class TractorTrailer2d:
         # Trailer rectangle
         hitch_x = px - self.lh * jnp.cos(theta1)
         hitch_y = py - self.lh * jnp.sin(theta1)
-        trailer_center_x = hitch_x - (self.l2/2) * jnp.cos(theta2)
-        trailer_center_y = hitch_y - (self.l2/2) * jnp.sin(theta2)
-        
+        trailer_center_x = hitch_x + (0.5 * (self.lf2 - self.lr2) - self.l2) * jnp.cos(theta2)
+        trailer_center_y = hitch_y + (0.5 * (self.lf2 - self.lr2) - self.l2) * jnp.sin(theta2)
+
         # Trailer corners in local coordinates
-        trailer_half_length = self.l2 / 2
+        trailer_half_length = (self.lf2 + self.lr2) / 2
         trailer_half_width = self.trailer_width / 2
         trailer_local_corners = jnp.array([
             [-trailer_half_length, -trailer_half_width],  # rear left
