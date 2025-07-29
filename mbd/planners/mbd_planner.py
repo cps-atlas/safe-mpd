@@ -65,15 +65,19 @@ class MBDConfig:
     motion_preference: int = 0  # 0=none, 1=forward, -1=backward
     # collision handling
     collision_penalty: float = 0.15  # penalty applied for obstacle collisions
-    enable_gated_rollout_collision: bool = False  # whether to use gated rollout for obstacle collision
     hitch_penalty: float = 0.10  # penalty applied for hitch angle violations
-    enable_gated_rollout_hitch: bool = False  # whether to use gated rollout for hitch violation
+    enable_gated_rollout_collision: bool = True  # whether to use gated rollout for obstacle collision
+    enable_gated_rollout_hitch: bool = True  # whether to use gated rollout for hitch violation
     enable_projection: bool = False  # whether to use projection to safe set
-    enable_guidance: bool = True  # whether to use gradient descent guidance for safety
+    enable_guidance: bool = False  # whether to use gradient descent guidance for safety
     # physical parameters
     l1: float = 3.23  # tractor wheelbase
     l2: float = 2.9   # trailer length
     lh: float = 1.15  # hitch length
+    lf1: float = 0.9  # default: 0.9 distac from tractor front axle to tractor front
+    lr: float = 1.848  # default: 1.848 rear axle offset from the reference point
+    lf2: float = 1.42  # default: 1.42 distance from trailer rear axle to trailer front
+    lr2: float = 3.225  # default: 3.225 distance from trailer rear axle to trailer rear
     tractor_width: float = 2.0  # tractor width
     trailer_width: float = 2.5  # trailer width
     # input constraints
@@ -102,9 +106,9 @@ class MBDConfig:
     ref_theta2_weight: float = 0.1 # theta2 weight in demo evaluation
     # animation
     render: bool = True
-    save_animation: bool = True # flag to enable animation saving
+    save_animation: bool = False # flag to enable animation saving
     show_animation: bool = True  # flag to show animation during creation
-    save_denoising_animation: bool = True  # flag to enable denoising process visualization
+    save_denoising_animation: bool = False  # flag to enable denoising process visualization
     frame_skip: int = 1  # skip every other frame for denoising animation
     dt: float = 0.25
 
@@ -148,6 +152,10 @@ def dict_to_config_obj(config_dict):
         l1=float(config_dict.get("l1", 3.23)),
         l2=float(config_dict.get("l2", 2.9)),
         lh=float(config_dict.get("lh", 1.15)),
+        lf1=float(config_dict.get("lf1", 0.9)),
+        lr=float(config_dict.get("lr", 1.848)),
+        lf2=float(config_dict.get("lf2", 1.42)),
+        lr2=float(config_dict.get("lr2", 3.225)),
         tractor_width=float(config_dict.get("tractor_width", 2.0)),
         trailer_width=float(config_dict.get("trailer_width", 2.5)),
         # input constraints
@@ -217,8 +225,11 @@ def run_diffusion(args=None, env=None):
     # Setup JIT compiled functions (with simple caching to avoid recompilation)
     jit_setup_start_time = time.time()
     
-    # Simple cache key based on environment type only
-    cache_key = f"{type(env).__name__}_env_funcs"
+    # Cache key based on environment type and state (x0, xg) to handle changing initial conditions
+    import hashlib
+    env_state_str = f"{tuple(env.x0)}_{tuple(env.xg)}"
+    env_state_hash = hashlib.md5(env_state_str.encode()).hexdigest()[:8]
+    cache_key = f"{type(env).__name__}_env_funcs_{env_state_hash}"
     
     if cache_key in _jit_function_cache:
         logging.debug(f"Using cached environment JIT functions")
@@ -773,6 +784,10 @@ if __name__ == "__main__":
         l1=config.l1,
         l2=config.l2,
         lh=config.lh,
+        lf1=config.lf1,
+        lr=config.lr,
+        lf2=config.lf2,
+        lr2=config.lr2,
         tractor_width=config.tractor_width,
         trailer_width=config.trailer_width,
         # input constraints

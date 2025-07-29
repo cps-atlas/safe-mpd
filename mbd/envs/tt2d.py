@@ -44,7 +44,7 @@ class TractorTrailer2d:
     def __init__(self, x0=None, xg=None, env_config=None, case="parking", dt=0.2, H=50, motion_preference=0, 
                  collision_penalty=0.15, enable_gated_rollout_collision=False, hitch_penalty=0.10, 
                  enable_gated_rollout_hitch=True, enable_projection=False, enable_guidance=False, reward_threshold=25.0, ref_reward_threshold=5.0,
-                 max_w_theta=0.75, hitch_angle_weight=0.2, l1=3.23, l2=2.9, lh=1.15, 
+                 max_w_theta=0.75, hitch_angle_weight=0.2, l1=3.23, l2=2.9, lh=1.15, lf1=0.9, lr=1.848, lf2=1.42, lr2=3.225, 
                  tractor_width=2.0, trailer_width=2.5, v_max=3.0, delta_max_deg=55.0,
                  d_thr_factor=1.0, k_switch=2.5, steering_weight=0.05, preference_penalty_weight=0.05,
                  heading_reward_weight=0.5, terminal_reward_threshold=10.0, terminal_reward_weight=1.0, ref_pos_weight=0.3, ref_theta1_weight=0.5, ref_theta2_weight=0.2):
@@ -81,6 +81,10 @@ class TractorTrailer2d:
         self.l1 = l1  # tractor wheelbase
         self.l2 = l2   # trailer length
         self.lh = lh  # hitch length
+        self.lf1 = lf1
+        self.lr = lr
+        self.lf2 = lf2
+        self.lr2 = lr2
         self.tractor_width = tractor_width
         self.trailer_width = trailer_width
         
@@ -209,6 +213,9 @@ class TractorTrailer2d:
             x = x if x is not None else -3.0
             y = y if y is not None else 0.0
             self.x0 = jnp.array([x, y, theta1, theta2])
+        
+        # Invalidate JIT cache when initial conditions change
+        self._invalidate_jit_cache()
 
     def set_goal_pos(self, x=None, y=None, theta1=None, theta2=None):
         """
@@ -235,10 +242,25 @@ class TractorTrailer2d:
         self.xg = jnp.array([new_x, new_y, new_theta1, new_theta2])
         logging.debug(f"overwrite xg: {self.xg}")
         
+        # Invalidate JIT cache when goal conditions change
+        self._invalidate_jit_cache()
+        
+    def _invalidate_jit_cache(self):
+        """Invalidate JIT function cache when environment state changes"""
+        try:
+            # Import here to avoid circular dependency
+            from mbd.planners.mbd_planner import clear_jit_cache
+            clear_jit_cache()
+            logging.debug("JIT cache invalidated due to environment state change")
+        except ImportError:
+            # If mbd_planner is not available, just pass
+            pass
+        
     def set_rectangle_obs(self, rectangles, coordinate_mode="left-top", padding=0.0):
         """Set rectangular obstacles"""
         self.obs_rectangles = self.env.set_rectangle_obs(rectangles, coordinate_mode=coordinate_mode, padding=padding)
 
+    @partial(jax.jit, static_argnums=(0,))
     def reset(self, rng: jax.Array):
         """Resets the environment to an initial state."""
         return State(self.x0, self.x0, 0.0, 0.0)
@@ -825,18 +847,18 @@ class TractorTrailer2d:
     
     @partial(jax.jit, static_argnums=(0,))
     def get_trailer_position(self, x):
-        """Get the trailer center position from state"""
+        """Get the trailer center position of the wheel axis. Used for cost function"""
         px, py, theta1, theta2 = x[:4]
         
         # Hitch point (at rear of tractor)
         hitch_x = px - self.lh * jnp.cos(theta1)
         hitch_y = py - self.lh * jnp.sin(theta1)
         
-        # Trailer center position
-        trailer_center_x = hitch_x - self.l2 * jnp.cos(theta2)
-        trailer_center_y = hitch_y - self.l2 * jnp.sin(theta2)
+        # Trailer center position of the wheel axis
+        trailer_frame_x = hitch_x - self.l2 * jnp.cos(theta2)
+        trailer_frame_y = hitch_y - self.l2 * jnp.sin(theta2)
         
-        return jnp.array([trailer_center_x, trailer_center_y])
+        return jnp.array([trailer_frame_x, trailer_frame_y])
         
     @partial(jax.jit, static_argnums=(0,))
     def get_tractor_trailer_rectangles(self, x):
@@ -844,11 +866,11 @@ class TractorTrailer2d:
         px, py, theta1, theta2 = x[:4]
         
         # Tractor rectangle (centered at tractor center)
-        tractor_center_x = px + (self.l1/2) * jnp.cos(theta1)
-        tractor_center_y = py + (self.l1/2) * jnp.sin(theta1)
-        
+        tractor_center_x = px + 0.5 * (self.l1 + self.lf1 - self.lr) * jnp.cos(theta1)
+        tractor_center_y = py + 0.5 * (self.l1 + self.lf1 - self.lr) * jnp.sin(theta1)
+
         # Tractor corners in local coordinates (before rotation)
-        tractor_half_length = self.l1 / 2
+        tractor_half_length = (self.l1 + self.lf1 + self.lr) / 2
         tractor_half_width = self.tractor_width / 2
         tractor_local_corners = jnp.array([
             [-tractor_half_length, -tractor_half_width],  # rear left
@@ -865,11 +887,11 @@ class TractorTrailer2d:
         # Trailer rectangle
         hitch_x = px - self.lh * jnp.cos(theta1)
         hitch_y = py - self.lh * jnp.sin(theta1)
-        trailer_center_x = hitch_x - (self.l2/2) * jnp.cos(theta2)
-        trailer_center_y = hitch_y - (self.l2/2) * jnp.sin(theta2)
-        
+        trailer_center_x = hitch_x + (0.5 * (self.lf2 - self.lr2) - self.l2) * jnp.cos(theta2)
+        trailer_center_y = hitch_y + (0.5 * (self.lf2 - self.lr2) - self.l2) * jnp.sin(theta2)
+
         # Trailer corners in local coordinates
-        trailer_half_length = self.l2 / 2
+        trailer_half_length = (self.lf2 + self.lr2) / 2
         trailer_half_width = self.trailer_width / 2
         trailer_local_corners = jnp.array([
             [-trailer_half_length, -trailer_half_width],  # rear left
@@ -1235,17 +1257,19 @@ class TractorTrailer2d:
         """Initialize the patches for tractor-trailer visualization"""
         
         # Tractor body (rectangle) - spans from rear axle to front axle
-        # In local coordinates: rear axle at (-l1/2, 0), front axle at (+l1/2, 0)
+        # Tractor body - use correct geometry including front and rear overhangs
+        tractor_full_length = self.l1 + self.lf1 + self.lr
         self.tractor_body = ax.add_patch(
-            plt.Rectangle((-self.l1/2, -self.tractor_width/2),
-                         self.l1, self.tractor_width,
+            plt.Rectangle((-tractor_full_length/2, -self.tractor_width/2),
+                         tractor_full_length, self.tractor_width,
                          linewidth=2, edgecolor='black', facecolor=tractor_color, alpha=0.7)
         )
         
-        # Trailer body (rectangle)
+        # Trailer body - use correct geometry including front and rear overhangs
+        trailer_full_length = self.lf2 + self.lr2
         self.trailer_body = ax.add_patch(
-            plt.Rectangle((-self.l2/2, -self.trailer_width/2),
-                         self.l2, self.trailer_width,
+            plt.Rectangle((-trailer_full_length/2, -self.trailer_width/2),
+                         trailer_full_length, self.trailer_width,
                          linewidth=2, edgecolor='black', facecolor=trailer_color, alpha=0.7)
         )
         
@@ -1263,7 +1287,7 @@ class TractorTrailer2d:
             self.tractor_wheels.append(wheel)
         
         # Trailer wheels
-        for i in range(2):
+        for i in range(1):
             wheel = ax.add_patch(
                 plt.Rectangle((-wheel_length/2, -wheel_width/2),
                              wheel_length, wheel_width,
@@ -1271,8 +1295,9 @@ class TractorTrailer2d:
             )
             self.trailer_wheels.append(wheel)
         
-        # Hitch connection line
-        self.hitch_line, = ax.plot([], [], 'k-', linewidth=3, alpha=0.8)
+        # Hitch connection lines
+        self.tractor_hitch_line, = ax.plot([], [], 'k-', linewidth=3, alpha=0.8)
+        self.trailer_hitch_line, = ax.plot([], [], 'k-', linewidth=3, alpha=0.8)
 
     def get_tractor_trailer_positions(self, x):
         """Calculate tractor and trailer positions and orientations"""
@@ -1294,9 +1319,9 @@ class TractorTrailer2d:
         trailer_rear_x = hitch_x - self.l2 * np.cos(theta2)
         trailer_rear_y = hitch_y - self.l2 * np.sin(theta2)
         
-        # Trailer front (at hitch point)
-        trailer_front_x = hitch_x
-        trailer_front_y = hitch_y
+        # Trailer front face center
+        trailer_front_x = hitch_x - (self.l2 - self.lf2) * np.cos(theta2)
+        trailer_front_y = hitch_y - (self.l2 - self.lf2) * np.sin(theta2)
         
         return {
             'tractor_rear': (tractor_rear_x, tractor_rear_y),
@@ -1315,17 +1340,21 @@ class TractorTrailer2d:
         # Get positions
         positions = self.get_tractor_trailer_positions(x)
         
-        # Tractor body transform (centered between rear and front axles)
-        # The body rectangle spans from rear axle to front axle
-        tractor_center_x = px + (self.l1/2) * np.cos(theta1)
-        tractor_center_y = py + (self.l1/2) * np.sin(theta1)
+        # Tractor body transform - use correct geometry from get_tractor_trailer_rectangles
+        # Tractor center position accounting for front and rear overhangs
+        tractor_center_x = px + 0.5 * (self.l1 + self.lf1 - self.lr) * np.cos(theta1)
+        tractor_center_y = py + 0.5 * (self.l1 + self.lf1 - self.lr) * np.sin(theta1)
         transform_tractor_body = (Affine2D()
                                  .rotate(theta1)
                                  .translate(tractor_center_x, tractor_center_y) + plt.gca().transData)
         
-        # Trailer body transform (centered at trailer center)
-        trailer_center_x = positions['hitch'][0] - (self.l2/2) * np.cos(theta2)
-        trailer_center_y = positions['hitch'][1] - (self.l2/2) * np.sin(theta2)
+        # Trailer body transform - use correct geometry from get_tractor_trailer_rectangles
+        # Hitch position
+        hitch_x = px - self.lh * np.cos(theta1)
+        hitch_y = py - self.lh * np.sin(theta1)
+        # Trailer center position accounting for front and rear overhangs
+        trailer_center_x = hitch_x + (0.5 * (self.lf2 - self.lr2) - self.l2) * np.cos(theta2)
+        trailer_center_y = hitch_y + (0.5 * (self.lf2 - self.lr2) - self.l2) * np.sin(theta2)
         transform_trailer_body = (Affine2D()
                                  .rotate(theta2)
                                  .translate(trailer_center_x, trailer_center_y) + plt.gca().transData)
@@ -1358,16 +1387,17 @@ class TractorTrailer2d:
         transforms_trailer_wheels.append(
             Affine2D().rotate(theta2).translate(*positions['trailer_rear']) + plt.gca().transData
         )
-        transforms_trailer_wheels.append(
-            Affine2D().rotate(theta2).translate(*positions['trailer_front']) + plt.gca().transData
-        )
+        # transforms_trailer_wheels.append(
+        #     Affine2D().rotate(theta2).translate(*positions['trailer_front']) + plt.gca().transData
+        # )
         
         return {
             'tractor_body': transform_tractor_body,
             'trailer_body': transform_trailer_body,
             'tractor_wheels': transforms_tractor_wheels,
             'trailer_wheels': transforms_trailer_wheels,
-            'hitch_line_data': (positions['tractor_rear'], positions['hitch'])
+            'tractor_hitch_line_data': (positions['tractor_rear'], positions['hitch']),
+            'trailer_hitch_line_data': (positions['trailer_front'], positions['hitch'])
         }
 
     def update_animation_patches(self, x, u=None):
@@ -1384,10 +1414,14 @@ class TractorTrailer2d:
         for i, wheel in enumerate(self.trailer_wheels):
             wheel.set_transform(transforms['trailer_wheels'][i])
         
-        # Update hitch line
-        hitch_data = transforms['hitch_line_data']
-        self.hitch_line.set_data([hitch_data[0][0], hitch_data[1][0]], 
-                                [hitch_data[0][1], hitch_data[1][1]])
+        # Update hitch lines
+        tractor_hitch_data = transforms['tractor_hitch_line_data']
+        self.tractor_hitch_line.set_data([tractor_hitch_data[0][0], tractor_hitch_data[1][0]], 
+                                        [tractor_hitch_data[0][1], tractor_hitch_data[1][1]])
+        
+        trailer_hitch_data = transforms['trailer_hitch_line_data']
+        self.trailer_hitch_line.set_data([trailer_hitch_data[0][0], trailer_hitch_data[1][0]], 
+                                        [trailer_hitch_data[0][1], trailer_hitch_data[1][1]])
 
     def _numpy_projection_function(self, args_tuple):
         """
@@ -1401,7 +1435,7 @@ class TractorTrailer2d:
         q_current_np, u_original_normalized_np = args_tuple
         
         # Store environment parameters for use in nested functions
-        l1, l2, lh = self.l1, self.l2, self.lh
+        l1, l2, lh, lf1, lr, lf2, lr2 = self.l1, self.l2, self.lh, self.lf1, self.lr, self.lf2, self.lr2
         tractor_width, trailer_width = self.tractor_width, self.trailer_width
         phi_max = self.phi_max
         v_max, delta_max = self.v_max, self.delta_max
@@ -1443,14 +1477,14 @@ class TractorTrailer2d:
             px, py, theta1, theta2 = x[:4]
             
             # Tractor rectangle (centered at tractor center)
-            tractor_center_x = px + (l1/2) * np.cos(theta1)
-            tractor_center_y = py + (l1/2) * np.sin(theta1)
+            tractor_center_x = px + 0.5 * (l1 + lf1 - lr) * np.cos(theta1)
+            tractor_center_y = py + 0.5 * (l1 + lf1 - lr) * np.sin(theta1)
             
             # Trailer rectangle
             hitch_x = px - lh * np.cos(theta1)
             hitch_y = py - lh * np.sin(theta1)
-            trailer_center_x = hitch_x - (l2/2) * np.cos(theta2)
-            trailer_center_y = hitch_y - (l2/2) * np.sin(theta2)
+            trailer_center_x = hitch_x + (0.5 * (lf2 - lr2) - l2) * np.cos(theta2)
+            trailer_center_y = hitch_y + (0.5 * (lf2 - lr2) - l2) * np.sin(theta2)
             
             return {
                 'tractor_center': np.array([tractor_center_x, tractor_center_y]),
