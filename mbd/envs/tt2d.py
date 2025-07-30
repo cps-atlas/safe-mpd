@@ -845,7 +845,22 @@ class TractorTrailer2d:
         trailer_frame_y = hitch_y - self.l2 * jnp.sin(theta2)
         
         return jnp.array([trailer_frame_x, trailer_frame_y])
+    
+    @partial(jax.jit, static_argnums=(0,))
+    def get_trailer_back_position(self, x):
+        """Get the trailer back position of the wheel axis. Used for cost function"""
+        px, py, theta1, theta2 = x[:4]
         
+        # Hitch point (at rear of tractor)
+        hitch_x = px - self.lh * jnp.cos(theta1)
+        hitch_y = py - self.lh * jnp.sin(theta1)
+        
+        # Trailer back position of the wheel axis
+        trailer_back_x = hitch_x - (self.l2 + self.lr2) * jnp.cos(theta2)
+        trailer_back_y = hitch_y - (self.l2 + self.lr2) * jnp.sin(theta2)
+        
+        return jnp.array([trailer_back_x, trailer_back_y])
+    
     @partial(jax.jit, static_argnums=(0,))
     def get_tractor_trailer_rectangles(self, x):
         """Get the corner points of tractor and trailer rectangles for collision checking"""

@@ -304,8 +304,8 @@ def evaluate_trial_result(final_trajectory_state: jnp.ndarray,
     # Tractor position (reference point)
     tractor_pos_error = np.sqrt((px - goal_px)**2 + (py - goal_py)**2)
     
-    # Trailer position 
-    trailer_positions = env.get_trailer_position(final_state_4d)
+    # Trailer back position (we care about the back when parking backward)
+    trailer_positions = env.get_trailer_back_position(final_state_4d)
     trailer_px, trailer_py = trailer_positions[0], trailer_positions[1]
     trailer_pos_error = np.sqrt((trailer_px - goal_px)**2 + (trailer_py - goal_py)**2)
     
@@ -479,7 +479,7 @@ def main():
         # Disable rendering for batch evaluation
         render=True,
         save_animation=False,
-        show_animation=True,
+        show_animation=False,
         save_denoising_animation=False,
         verbose=False,
         # Algorithm
