@@ -39,6 +39,8 @@ _jit_function_cache = {}
 
 
 def clear_jit_cache():
+    # NOTE: if you change any of the static arguments in multiple runs, you need to clear the cache.
+    # NOTE: for example, motion preference, Ndiffuse, etc
     """Clear the JIT function cache - useful for tests with different configurations"""
     global _jit_function_cache
     _jit_function_cache.clear()
