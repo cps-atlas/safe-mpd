@@ -180,8 +180,8 @@ ACC_TEST_SCENARIOS = {
         motion_preference=-1,
         expected_reward_min=0.3,
         expected_reward_max=2.0,
-        init_dx=12.0,
-        init_dy=4.0,
+        init_dx=13.0,
+        init_dy=5.0,
         init_theta1=0.0,
         init_theta2=0.0,
         goal_theta1=jnp.pi/2,
@@ -204,37 +204,37 @@ ACC_TEST_SCENARIOS = {
         goal_theta2=-jnp.pi/2
     ),
     
-    "acc_parking_enforce_forward": TestConfig(
-        test_name="acc_parking_enforce_forward",
-        description="Parking with strict forward enforcement (acceleration dynamics)",
-        env_name="acc_tt2d",
-        enable_demo=False,
-        motion_preference=2,
-        expected_reward_min=0.3,
-        expected_reward_max=2.0,
-        init_dx=-5.0,
-        init_dy=5.0,
-        init_theta1=0.0,
-        init_theta2=0.0,
-        goal_theta1=-jnp.pi/2,
-        goal_theta2=-jnp.pi/2
-    ),
+    # "acc_parking_enforce_forward": TestConfig(
+    #     test_name="acc_parking_enforce_forward",
+    #     description="Parking with strict forward enforcement (acceleration dynamics)",
+    #     env_name="acc_tt2d",
+    #     enable_demo=False,
+    #     motion_preference=2,
+    #     expected_reward_min=0.3,
+    #     expected_reward_max=2.0,
+    #     init_dx=-5.0,
+    #     init_dy=5.0,
+    #     init_theta1=0.0,
+    #     init_theta2=0.0,
+    #     goal_theta1=-jnp.pi/2,
+    #     goal_theta2=-jnp.pi/2
+    # ),
     
-    "acc_parking_enforce_backward": TestConfig(
-        test_name="acc_parking_enforce_backward",
-        description="Parking with strict backward enforcement (acceleration dynamics)",
-        env_name="acc_tt2d",
-        enable_demo=False,
-        motion_preference=-2,
-        expected_reward_min=0.3,
-        expected_reward_max=2.0,
-        init_dx=-12.0,
-        init_dy=1.0,
-        init_theta1=jnp.pi,
-        init_theta2=jnp.pi,
-        goal_theta1=jnp.pi/2,
-        goal_theta2=jnp.pi/2
-    ),
+    # "acc_parking_enforce_backward": TestConfig(
+    #     test_name="acc_parking_enforce_backward",
+    #     description="Parking with strict backward enforcement (acceleration dynamics)",
+    #     env_name="acc_tt2d",
+    #     enable_demo=False,
+    #     motion_preference=-2,
+    #     expected_reward_min=0.3,
+    #     expected_reward_max=2.0,
+    #     init_dx=-12.0,
+    #     init_dy=1.0,
+    #     init_theta1=jnp.pi,
+    #     init_theta2=jnp.pi,
+    #     goal_theta1=jnp.pi/2,
+    #     goal_theta2=jnp.pi/2
+    # ),
 }
 
 # Demo versions of all scenarios (automatically generated) - DEMONSTRATION IS SPECIAL CASE

@@ -39,10 +39,12 @@ _jit_function_cache = {}
 
 
 def clear_jit_cache():
+    # NOTE: if you change any of the static arguments in multiple runs, you need to clear the cache.
+    # NOTE: for example, motion preference, Ndiffuse, etc
     """Clear the JIT function cache - useful for tests with different configurations"""
     global _jit_function_cache
     _jit_function_cache.clear()
-    logging.debug("JIT function cache cleared")
+    logging.info("JIT function cache cleared")
 
 
 @dataclass
@@ -226,25 +228,25 @@ def run_diffusion(args=None, env=None):
     jit_setup_start_time = time.time()
     
     # Cache key based on environment type and state (x0, xg) to handle changing initial conditions
-    import hashlib
-    env_state_str = f"{tuple(env.x0)}_{tuple(env.xg)}"
-    env_state_hash = hashlib.md5(env_state_str.encode()).hexdigest()[:8]
-    cache_key = f"{type(env).__name__}_env_funcs_{env_state_hash}"
+    # import hashlib
+    # env_state_str = f"{tuple(env.x0)}_{tuple(env.xg)}"
+    # env_state_hash = hashlib.md5(env_state_str.encode()).hexdigest()[:8]
+    cache_key = f"{type(env).__name__}_env_funcs"
     
     if cache_key in _jit_function_cache:
         logging.debug(f"Using cached environment JIT functions")
-        step_env_jit, reset_env_jit, rollout_us_jit, rollout_us_with_terminal_jit = _jit_function_cache[cache_key]
+        step_env_jit, rollout_us_jit, rollout_us_with_terminal_jit = _jit_function_cache[cache_key]
     else:
         logging.info(f"Creating new environment JIT functions")
         step_env_jit = jax.jit(env.step)
-        reset_env_jit = jax.jit(env.reset)
         rollout_us_jit = jax.jit(partial(rollout_us, step_env_jit))
         rollout_us_with_terminal_jit = jax.jit(partial(rollout_us_with_terminal, step_env_jit, env))
-        _jit_function_cache[cache_key] = (step_env_jit, reset_env_jit, rollout_us_jit, rollout_us_with_terminal_jit)
+        _jit_function_cache[cache_key] = (step_env_jit, rollout_us_jit, rollout_us_with_terminal_jit)
     
     # NOTE: a, b = jax.random.split(b) is a standard way to use random. always use a as random variable, not b. 
     rng, rng_reset = jax.random.split(rng)  # NOTE: rng_reset should never be changed.
-    state_init = reset_env_jit(rng_reset) # NOTE: in car2d, just reset with pre-defined x0. currently no randomization.
+    state_init = env.reset(rng_reset)
+    #print(f"state_init: {state_init}")
     jit_setup_time = time.time() - jit_setup_start_time
     
     # Simple cache key for reverse_once function
@@ -262,10 +264,6 @@ def run_diffusion(args=None, env=None):
         logging.debug(f"Diffusion shapes: Nsample={args.Nsample}, Hsample={args.Hsample}, Ndiffuse={args.Ndiffuse}")
         warmup_start_time = time.time()
         
-        # Warm up step_env_jit and reset_env_jit (already done above, but let's be explicit)
-        logging.debug("  Warming up reset_env_jit...")
-        _ = reset_env_jit(rng_reset)
-        logging.debug("  Warming up step_env_jit...")
         # Use the SAME action shape AND creation pattern that will be used in post-processing
         # Create a dummy Y0 array and extract actions the same way as in post-processing
         dummy_Y0_warmup = jnp.zeros([args.Hsample, Nu])
@@ -306,7 +304,7 @@ def run_diffusion(args=None, env=None):
     def compute_steering_reward(Y0s):
         """
         Compute trajectory-level steering reward for action sequences.
-        Y0s: (Nsample, Hsample, Nu) where Nu=2 (v, delta)
+        Y0s: (Nsample, Hsample, Nu) where Nu=2 (v, delta). In acc_tt2d, it's (a, w), so it's penalizing steering angle rate.
         Returns: (Nsample,) steering rewards
         """
         # Extract steering angles (second action dimension)
@@ -343,13 +341,14 @@ def run_diffusion(args=None, env=None):
         reverse_once = _jit_function_cache[reverse_once_cache_key]
     else:
         logging.debug(f"Creating new reverse_once function")
-        @partial(jax.jit, static_argnums=(1,))
-        def reverse_once(carry, config_params_tuple):
+        @partial(jax.jit, static_argnums=(2,))
+        def reverse_once(carry, state_init, config_params_tuple):
             """
             Single reverse diffusion step with configuration parameters as arguments.
             
             Args:
                 carry: (i, rng, Ybar_i) tuple
+                state_init: Initial state for rollouts (traced argument)
                 config_params_tuple: Tuple of (motion_preference, temp_sample, enable_demo, Nsample, Hsample, Nu)
             """
             i, rng, Ybar_i = carry
@@ -428,26 +427,26 @@ def run_diffusion(args=None, env=None):
         # Cache the function for future use
         _jit_function_cache[reverse_once_cache_key] = reverse_once
     
-        # Warm up reverse_once function that will be used in actual computation
-        # This ensures JIT compilation happens now with correct arguments, not during timing
-        logging.debug("  Warming up reverse_once...")
-        warmup_i = args.Ndiffuse - 1  # Valid index for warmup
-        warmup_carry = (warmup_i, rng, YN)
-        
-        # Create config parameters tuple for warmup (order must match function signature)
-        warmup_config_params = (
-            args.motion_preference,
-            args.temp_sample,
-            args.enable_demo,
-            args.Nsample,
-            args.Hsample,
-            Nu
-        )
-        
-        logging.debug(f"    warmup_carry shapes: i={warmup_i}, rng.shape={rng.shape}, YN.shape={YN.shape}")
-        logging.debug(f"    Using indices: alphas_bar[{warmup_i}], sigmas[{warmup_i}]")
-        _ = reverse_once(warmup_carry, warmup_config_params)  # This compiles the function with correct shapes
-        logging.debug("  reverse_once warmup completed")
+    # Warm up reverse_once function that will be used in actual computation
+    # NOTE: always warm up reverse_once to make sure that new state_init is used.
+    logging.debug("  Warming up reverse_once...")
+    warmup_i = args.Ndiffuse - 1  # Valid index for warmup
+    warmup_carry = (warmup_i, rng, YN)
+    
+    # Create config parameters tuple for warmup (order must match function signature)
+    warmup_config_params = (
+        args.motion_preference,
+        args.temp_sample,
+        args.enable_demo,
+        args.Nsample,
+        args.Hsample,
+        Nu
+    )
+    
+    logging.debug(f"    warmup_carry shapes: i={warmup_i}, rng.shape={rng.shape}, YN.shape={YN.shape}")
+    logging.debug(f"    Using indices: alphas_bar[{warmup_i}], sigmas[{warmup_i}]")
+    _ = reverse_once(warmup_carry, state_init, warmup_config_params)  # This compiles the function with correct shapes
+    logging.debug("  reverse_once warmup completed")
         
     warmup_time = time.time() - warmup_start_time
     if need_warmup:
@@ -473,7 +472,7 @@ def run_diffusion(args=None, env=None):
     pure_diffusion_start_time = time.time()
     
     # run reverse
-    def reverse(YN, rng):
+    def reverse(YN, rng, state_init):
         Yi = YN
         # Pre-allocate Ybars array to avoid dynamic concatenation recompilation
         # Shape: (Ndiffuse-1, Hsample, Nu) where Ndiffuse-1 is the number of iterations
@@ -497,7 +496,7 @@ def run_diffusion(args=None, env=None):
                 if i == args.Ndiffuse - 1:
                     #print(f"    First diffusion step: carry shapes i={i}, rng.shape={rng.shape}, Yi.shape={Yi.shape}")
                     pass
-                (i, rng, Yi), rew = reverse_once(carry_once, config_params)  # Pass config_params tuple
+                (i, rng, Yi), rew = reverse_once(carry_once, state_init, config_params)  # Pass state_init and config_params
                 # Use index assignment instead of append to avoid recompilation
                 Ybars = Ybars.at[idx].set(Yi)
                 # Update the progress bar's suffix to show the current reward
@@ -505,7 +504,7 @@ def run_diffusion(args=None, env=None):
         return Ybars, Yi  # Return both all Ybars and final Yi
 
     rng_exp, rng = jax.random.split(rng)
-    Ybars, Y0 = reverse(YN, rng_exp) # NOTE: YN: all zeros, one trajectory of actions 
+    Ybars, Y0 = reverse(YN, rng_exp, state_init) # NOTE: YN: all zeros, one trajectory of actions 
     
     pure_diffusion_time = time.time() - pure_diffusion_start_time
     logging.debug(f"Diffusion computation completed in {pure_diffusion_time:.3f}s")

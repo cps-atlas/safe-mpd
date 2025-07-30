@@ -215,7 +215,7 @@ class TractorTrailer2d:
             self.x0 = jnp.array([x, y, theta1, theta2])
         
         # Invalidate JIT cache when initial conditions change
-        self._invalidate_jit_cache()
+        #mbd.planners.mbd_planner.clear_jit_cache()
 
     def set_goal_pos(self, x=None, y=None, theta1=None, theta2=None):
         """
@@ -243,19 +243,8 @@ class TractorTrailer2d:
         logging.debug(f"overwrite xg: {self.xg}")
         
         # Invalidate JIT cache when goal conditions change
-        self._invalidate_jit_cache()
-        
-    def _invalidate_jit_cache(self):
-        """Invalidate JIT function cache when environment state changes"""
-        try:
-            # Import here to avoid circular dependency
-            from mbd.planners.mbd_planner import clear_jit_cache
-            clear_jit_cache()
-            logging.debug("JIT cache invalidated due to environment state change")
-        except ImportError:
-            # If mbd_planner is not available, just pass
-            pass
-        
+        #mbd.planners.mbd_planner.clear_jit_cache()
+
     def set_rectangle_obs(self, rectangles, coordinate_mode="left-top", padding=0.0):
         """Set rectangular obstacles"""
         self.obs_rectangles = self.env.set_rectangle_obs(rectangles, coordinate_mode=coordinate_mode, padding=padding)
