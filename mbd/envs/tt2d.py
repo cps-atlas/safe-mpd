@@ -116,9 +116,6 @@ class TractorTrailer2d:
         self.obs_circles = obstacles['circles']
         self.obs_rectangles = obstacles['rectangles']
         
-        # For backward compatibility with existing collision checking
-        self.obs = self.obs_circles
-        
         # Set initial and goal states based on case and user input
         if x0 is None:
             if case == "parking":

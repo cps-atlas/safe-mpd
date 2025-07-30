@@ -1,10 +1,10 @@
-from .car2d import Car2d
 from .tt2d import TractorTrailer2d
 from .acc_tt2d import AccTractorTrailer2d
 
 def get_env(
     env_name: str,
     case: str = "navigation",
+    env_config=None,
     dt=0.2,
     H=50,
     motion_preference=0,
@@ -45,6 +45,7 @@ def get_env(
     if env_name == "tt2d":
         return TractorTrailer2d(
             case=case,
+            env_config=env_config,
             dt=dt,
             H=H,
             motion_preference=motion_preference,
@@ -83,6 +84,7 @@ def get_env(
     elif env_name == "acc_tt2d":
         return AccTractorTrailer2d(
             case=case,
+            env_config=env_config,
             dt=dt,
             H=H,
             motion_preference=motion_preference,

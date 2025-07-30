@@ -27,18 +27,18 @@ class Env:
             if parking_config is None:
                 parking_config = self.get_default_parking_config()
             self.parking_config = parking_config
-            self.obs_circle = self.set_obs_circle_parking(parking_config)
-            self.obs_rectangle = self.set_obs_rectangle_parking()
+            self.obs_circles = self.set_obs_circle_parking(parking_config)
+            self.obs_rectangles = self.set_obs_rectangle_parking()
         elif case == "navigation":
             # Navigation test case - obstacles will be set via set_rectangle_obs
-            self.obs_circle = []  # No circular obstacles for navigation
-            self.obs_rectangle = []  # Will be set later via set_rectangle_obs
+            self.obs_circles = []  # No circular obstacles for navigation
+            self.obs_rectangles = []  # Will be set later via set_rectangle_obs
         else:
             raise ValueError(f"Unknown case: {case}")
             
-        # if self.obs_circle is empty, set a far away obstacle with radius 0
-        if len(self.obs_circle) == 0:
-            self.obs_circle = [[0.0, 0.0, 0.0]]
+        # if self.obs_circles is empty, set a far away obstacle with radius 0
+        if len(self.obs_circles) == 0:
+            self.obs_circles = [[0.0, 0.0, 0.0]]
 
     def get_default_parking_config(self):
         """Default parking configuration for parking scenario"""
@@ -69,11 +69,11 @@ class Env:
 
     def set_obs_rectangle_parking(self):
         """Set rectangular obstacles for parking scenario"""
-        obs_rectangle = [
+        obs_rectangles = [
             [0.0, 15.0, 30.0, 1.0, 0.0],
             [0.0, -14.0, 30.0, 1.0, 0.0]
         ]
-        return obs_rectangle
+        return obs_rectangles
     
     def set_obs_circle_parking(self, parking_config):
         """Set circular obstacles for parking scenario"""
@@ -171,18 +171,18 @@ class Env:
     def get_obstacles(self):
         """Get obstacles for collision checking - returns both circular and rectangular"""
         obstacles = {
-            'circles': jnp.array(self.obs_circle) if len(self.obs_circle) > 0 else jnp.array([]).reshape(0, 3),
-            'rectangles': jnp.array(self.obs_rectangle) if len(self.obs_rectangle) > 0 else jnp.array([]).reshape(0, 5)
+            'circles': jnp.array(self.obs_circles) if len(self.obs_circles) > 0 else jnp.array([]).reshape(0, 3),
+            'rectangles': jnp.array(self.obs_rectangles) if len(self.obs_rectangles) > 0 else jnp.array([]).reshape(0, 5)
         }
         return obstacles
 
     def get_circular_obstacles(self):
         """Get only circular obstacles (for backward compatibility)"""
-        return jnp.array(self.obs_circle) if len(self.obs_circle) > 0 else jnp.array([]).reshape(0, 3)
+        return jnp.array(self.obs_circles) if len(self.obs_circles) > 0 else jnp.array([]).reshape(0, 3)
 
     def get_rectangular_obstacles(self):
         """Get only rectangular obstacles"""
-        return jnp.array(self.obs_rectangle) if len(self.obs_rectangle) > 0 else jnp.array([]).reshape(0, 5)
+        return jnp.array(self.obs_rectangles) if len(self.obs_rectangles) > 0 else jnp.array([]).reshape(0, 5)
 
     def is_in_bounds(self, x, y):
         """Check if point is within environment bounds"""
@@ -257,9 +257,9 @@ class Env:
             else:
                 raise ValueError(f"coordinate_mode must be 'left-top' or 'center', got {coordinate_mode}")
         
-        self.obs_rectangle = np.array(converted_obstacles)
+        self.obs_rectangles = np.array(converted_obstacles)
         logging.debug(f"Set {len(converted_obstacles)} rectangular obstacles with {coordinate_mode} coordinates")
-        return self.obs_rectangle
+        return self.obs_rectangles
 
     def set_plot_limits(self, x_range, y_range):
         """Set custom plot limits for visualization"""
