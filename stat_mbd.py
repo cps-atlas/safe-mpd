@@ -467,7 +467,7 @@ def run_statistical_evaluation(config: MBDConfig,
     return results
 
 
-def create_heat_map_visualization(individual_results: List[Dict], env, verbose: bool = True):
+def create_heat_map_visualization(individual_results: List[Dict], env, verbose: bool = True, return_fig: bool = False):
     """
     Create heat map visualization showing initial positions and success/failure outcomes.
     
@@ -475,6 +475,10 @@ def create_heat_map_visualization(individual_results: List[Dict], env, verbose: 
         individual_results: List of trial results with success/failure info
         env: Environment used for rendering
         verbose: Whether to print status messages
+        return_fig: If True, return the figure object instead of showing it
+        
+    Returns:
+        matplotlib.figure.Figure if return_fig=True, otherwise None
     """
     if verbose:
         print("Generating heat map visualization...")
@@ -528,8 +532,9 @@ def create_heat_map_visualization(individual_results: List[Dict], env, verbose: 
                 fontsize=12, bbox=dict(boxstyle='round', facecolor='yellow', alpha=0.7))
     
     # Customize plot
-    ax.set_title('MBD Planner Performance Heat Map\nInitial Positions vs Success/Failure', 
-                fontsize=14, fontweight='bold')
+    if not return_fig:
+        ax.set_title('MBD Planner Performance Heat Map\nInitial Positions vs Success/Failure', 
+                    fontsize=14, fontweight='bold')
     ax.set_xlabel('X Position (m)', fontsize=12)
     ax.set_ylabel('Y Position (m)', fontsize=12)
     ax.grid(True, alpha=0.3)
@@ -543,10 +548,18 @@ def create_heat_map_visualization(individual_results: List[Dict], env, verbose: 
             bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
     
     plt.tight_layout()
-    plt.show()
     
-    if verbose:
-        print(f"Heat map displayed: {len(successful_positions)} successful, {len(failed_positions)} failed trials")
+    if return_fig:
+        # Return the figure object for external use (e.g., W&B upload)
+        if verbose:
+            print(f"Heat map created: {len(successful_positions)} successful, {len(failed_positions)} failed trials")
+        return fig
+    else:
+        # Show the plot as before
+        plt.show()
+        if verbose:
+            print(f"Heat map displayed: {len(successful_positions)} successful, {len(failed_positions)} failed trials")
+        return None
         
 
 
