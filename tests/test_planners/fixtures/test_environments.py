@@ -40,16 +40,16 @@ def setup_parking_environment(config: TestConfig) -> Env:
     
     # Add custom circular obstacles if specified
     if config.custom_circular_obstacles:
-        existing_circles = env.obs_circle if len(env.obs_circle) > 0 else []
+        existing_circles = env.obs_circles if len(env.obs_circles) > 0 else []
         # Filter out the default dummy obstacle (0,0,0) if it exists
         existing_circles = [obs for obs in existing_circles if obs[2] > 0]
-        env.obs_circle = existing_circles + config.custom_circular_obstacles
+        env.obs_circles = existing_circles + config.custom_circular_obstacles
         logging.debug(f"Added {len(config.custom_circular_obstacles)} custom circular obstacles")
         
     # Add custom rectangular obstacles if specified  
     if config.custom_rectangular_obstacles:
-        existing_rects = env.obs_rectangle if len(env.obs_rectangle) > 0 else []
-        env.obs_rectangle = existing_rects + config.custom_rectangular_obstacles
+        existing_rects = env.obs_rectangles if len(env.obs_rectangles) > 0 else []
+        env.obs_rectangles = existing_rects + config.custom_rectangular_obstacles
         logging.debug(f"Added {len(config.custom_rectangular_obstacles)} custom rectangular obstacles")
         
     return env
