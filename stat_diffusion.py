@@ -26,6 +26,7 @@ import logging
 from dataclasses import dataclass
 from typing import Dict, List, Tuple, Optional
 import time
+import matplotlib.pyplot as plt
 
 # Add the MBD source path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__)))
@@ -282,7 +283,7 @@ def create_trial_environment(base_config: MBDConfig, trial_config: TrialConfig):
 
 def evaluate_trial_result(final_trajectory_state: jnp.ndarray, 
                          env, 
-                         goal_position_threshold: float = 4.5) -> Dict:
+                         goal_position_threshold: float = 4.0) -> Dict:
     """
     Evaluate the results of a single diffusion trial.
     
@@ -335,7 +336,8 @@ def evaluate_trial_result(final_trajectory_state: jnp.ndarray,
 def run_statistical_evaluation(config: MBDConfig, 
                               num_trials: int = 20,
                               seed: int = 42,
-                              verbose: bool = True) -> StatisticalResults:
+                              verbose: bool = True,
+                              show_heat_map: bool = False) -> StatisticalResults:
     """
     Run statistical evaluation with multiple trials and diverse initial conditions.
     
@@ -344,6 +346,7 @@ def run_statistical_evaluation(config: MBDConfig,
         num_trials: Number of trials to run
         seed: Random seed for reproducibility  
         verbose: Whether to print progress information
+        show_heat_map: Whether to display heat map of initial positions with success/failure markers
         
     Returns:
         StatisticalResults with comprehensive performance metrics
@@ -457,7 +460,94 @@ def run_statistical_evaluation(config: MBDConfig,
         print(f"Avg Pure Diffusion Time: {avg_pure_diffusion_time:.3f}±{std_pure_diffusion_time:.3f}s")
         print("=" * 40)
     
+    # Generate heat map visualization if requested
+    if show_heat_map:
+        create_heat_map_visualization(individual_results, env, verbose)
+    
     return results
+
+
+def create_heat_map_visualization(individual_results: List[Dict], env, verbose: bool = True):
+    """
+    Create heat map visualization showing initial positions and success/failure outcomes.
+    
+    Args:
+        individual_results: List of trial results with success/failure info
+        env: Environment used for rendering
+        verbose: Whether to print status messages
+    """
+    if verbose:
+        print("Generating heat map visualization...")
+    
+    # Create figure and axis
+    fig, ax = plt.subplots(1, 1, figsize=(12, 10))
+    
+    # Render environment (obstacles, parking spaces, etc.) with empty trajectory
+    env.render(ax, jnp.array([]).reshape(0, 4))
+    
+    # Extract initial positions and success status
+    successful_positions = []
+    failed_positions = []
+    
+    for result in individual_results:
+        if 'trial_config' in result and 'error' not in result:
+            trial_config = result['trial_config']
+            
+            # Set the initial position for this trial to get correct x, y coordinates
+            env.set_init_pos(
+                dx=trial_config.dx,
+                dy=trial_config.dy,
+                theta1=trial_config.theta1,
+                theta2=trial_config.theta2
+            )
+            
+            # Get the actual x, y coordinates from environment
+            initial_x, initial_y = float(env.x0[0]), float(env.x0[1])
+            
+            if result['success']:
+                successful_positions.append((initial_x, initial_y))
+            else:
+                failed_positions.append((initial_x, initial_y))
+    
+    # Plot successful trials as green circles
+    if successful_positions:
+        success_x, success_y = zip(*successful_positions)
+        ax.scatter(success_x, success_y, c='green', marker='o', s=120, alpha=0.7, 
+                    edgecolors='darkgreen', linewidth=2, label=f'Success ({len(successful_positions)})')
+    
+    # Plot failed trials as red crosses  
+    if failed_positions:
+        fail_x, fail_y = zip(*failed_positions)
+        ax.scatter(fail_x, fail_y, c='red', marker='x', s=120, alpha=0.7,
+                    linewidth=3, label=f'Failed ({len(failed_positions)})')
+    
+    # Handle case where no positions were extracted
+    if not successful_positions and not failed_positions:
+        ax.text(0.5, 0.5, 'No valid trial positions found', 
+                transform=ax.transAxes, ha='center', va='center',
+                fontsize=12, bbox=dict(boxstyle='round', facecolor='yellow', alpha=0.7))
+    
+    # Customize plot
+    ax.set_title('MBD Planner Performance Heat Map\nInitial Positions vs Success/Failure', 
+                fontsize=14, fontweight='bold')
+    ax.set_xlabel('X Position (m)', fontsize=12)
+    ax.set_ylabel('Y Position (m)', fontsize=12)
+    ax.grid(True, alpha=0.3)
+    ax.legend(loc='upper right', fontsize=11)
+    
+    # Add summary statistics as text
+    total_trials = len(individual_results)
+    success_rate = len(successful_positions) / total_trials if total_trials > 0 else 0
+    ax.text(0.02, 0.98, f'Success Rate: {success_rate:.1%}\nTotal Trials: {total_trials}', 
+            transform=ax.transAxes, fontsize=10, verticalalignment='top',
+            bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+    
+    plt.tight_layout()
+    plt.show()
+    
+    if verbose:
+        print(f"Heat map displayed: {len(successful_positions)} successful, {len(failed_positions)} failed trials")
+        
 
 
 def main():
@@ -477,7 +567,7 @@ def main():
         Hsample=50,
         Ndiffuse=100,
         # Disable rendering for batch evaluation
-        render=True,
+        render=False,
         save_animation=False,
         show_animation=False,
         save_denoising_animation=False,
@@ -492,9 +582,10 @@ def main():
     # Run statistical evaluation
     results = run_statistical_evaluation(
         config=config,
-        num_trials=10,  # Small number for testing
+        num_trials=5,  # Small number for testing
         seed=42,
-        verbose=True
+        verbose=True,
+        show_heat_map=True  # Enable heat map visualization
     )
     
     print(f"\nFinal Summary:")

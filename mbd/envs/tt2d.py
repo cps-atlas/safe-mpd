@@ -1229,9 +1229,10 @@ class TractorTrailer2d:
                 ax.add_patch(rect)
         
         # Plot trajectory
-        ax.scatter(xs[:, 0], xs[:, 1], c=range(self.H + 1), cmap="Reds", s=45)
-        ax.plot(xs[:, 0], xs[:, 1], "r-", linewidth=1.5, label="Tractor path")
-        
+        if xs.shape[0] > 0:
+            ax.scatter(xs[:, 0], xs[:, 1], c=range(self.H + 1), cmap="Reds", s=45)
+            ax.plot(xs[:, 0], xs[:, 1], "r-", linewidth=1.5, label="Tractor path")
+            
         # Plot tractor and trailer orientations (optional)
         # ax.quiver(
         #     xs[::5, 0], xs[::5, 1],
