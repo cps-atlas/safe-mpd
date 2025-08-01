@@ -32,6 +32,11 @@ docker exec -it jax_dev bash
 python $your_code$.py
 ```
 
+4. (optional, updated on 250801) Only when you run tests/tune_mbd.py, run this line inside the docer. Since optuna's GP sampler requires torch (which deafult to require numpy==1.x), and jax[cuda12] requires numpy>=2, this is the lazy solution I found to fix the version issue. If you run `uv add` separately, then the version breaks. 
+```bash
+uv add torch==2.3.1 "jax[cuda12]"
+```
+
 ## Run examples
 To be updated. But refer to the below readme (from the original repo)
 

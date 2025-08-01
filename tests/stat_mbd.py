@@ -28,8 +28,8 @@ from typing import Dict, List, Tuple, Optional
 import time
 import matplotlib.pyplot as plt
 
-# Add the MBD source path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__)))
+# Add the MBD source path - go up one level from tests to reach mbd module
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 import mbd
 from mbd.planners.mbd_planner import MBDConfig, run_diffusion, clear_jit_cache

@@ -29,8 +29,8 @@ from optuna.pruners import MedianPruner
 import wandb
 import matplotlib.pyplot as plt
 
-# Add the MBD source path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__)))
+# Add the MBD source path - go up one level from tests to reach mbd module
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from mbd.planners.mbd_planner import MBDConfig, clear_jit_cache
 from stat_mbd import run_statistical_evaluation, StatisticalResults, create_trial_environment, create_heat_map_visualization
@@ -90,10 +90,9 @@ class DiffusionOptimizer:
             'delta_max_deg': config.delta_max_deg,
         }
     
-    def create_and_upload_heat_map(self, results: StatisticalResults, config: MBDConfig, trial_number: int):
+    def create_heat_map(self, results: StatisticalResults, config: MBDConfig, trial_number: int):
         """
-        Create heat map visualization and upload to W&B.
-        Reuses the heat map creation function from stat_mbd.py to avoid code duplication.
+        Create heat map visualization.
         
         Args:
             results: Statistical evaluation results
@@ -101,12 +100,12 @@ class DiffusionOptimizer:
             trial_number: Current trial number for logging
         """
         if not self.use_wandb:
-            return
+            return None
         
         # Create a representative environment for rendering
         sample_trial_config = results.individual_results[0]['trial_config'] if results.individual_results else None
         if sample_trial_config is None:
-            return
+            return None
             
         env = create_trial_environment(config, sample_trial_config)
         
@@ -129,19 +128,8 @@ class DiffusionOptimizer:
         # Convert matplotlib figure to numpy array for W&B
         fig.canvas.draw()
         
-        # # Get the RGBA buffer from the figure
-        # buf = np.frombuffer(fig.canvas.tostring_argb(), dtype=np.uint8)
-        # buf = buf.reshape(fig.canvas.get_width_height()[::-1] + (3,))
-        
-        # Log image to W&B using numpy array directly
-        wandb.log({
-            f"heat_map_trial_{trial_number}": wandb.Image(fig, caption=f"Trial {trial_number} Performance Heat Map"),
-            "trial_number": trial_number
-        })
-        
-        plt.close(fig)  # Clean up
-        
         print(f"Heat map for trial {trial_number} uploaded to W&B")
+        return fig
             
     
     def define_hyperparameter_space(self, trial: optuna.Trial) -> Dict[str, Any]:
@@ -309,7 +297,7 @@ class DiffusionOptimizer:
         objective_score = success_rate
         
         # Create and upload heat map to W&B
-        self.create_and_upload_heat_map(results, config, trial.number)
+        fig_heat_map = self.create_heat_map(results, config, trial.number)
         
         # Store detailed results
         trial_result = {
@@ -341,8 +329,10 @@ class DiffusionOptimizer:
                 'avg_pure_diffusion_time': results.avg_pure_diffusion_time,
                 'compute_time': compute_time,
                 'safety': safety,
+                f"heat_map_trial_{trial.number}": wandb.Image(fig_heat_map, caption=f"Trial {trial.number} Performance Heat Map"),
                 **{f'param_{k}': v for k, v in params.items()}
             })
+            plt.close(fig_heat_map)
         
         print(f"Trial {trial.number}: Score={objective_score:.3f}, "
               f"Success={success_rate:.1%}, Time={results.avg_pure_diffusion_time:.2f}s")
@@ -515,7 +505,7 @@ def main():
     # Create optimizer
     optimizer = DiffusionOptimizer(
         base_config=base_config,
-        num_trials_per_eval=100,  # Statistical trials per hyperparameter evaluation
+        num_trials_per_eval=2,  # Statistical trials per hyperparameter evaluation
         study_name="mbd_parking_optimization",
         use_wandb=True
     )
