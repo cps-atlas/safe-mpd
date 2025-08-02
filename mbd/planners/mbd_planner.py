@@ -50,7 +50,7 @@ def clear_jit_cache():
 @dataclass
 class MBDConfig:
     # exp
-    seed: int = 0
+    seed: int = 42
     # env
     env_name: str = "acc_tt2d"  # "tt2d" for kinematic, "acc_tt2d" for acceleration
     case: str = "parking" # "parking" for parking scenario, "navigation" for navigation scenario

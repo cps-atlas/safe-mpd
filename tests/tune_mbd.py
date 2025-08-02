@@ -456,7 +456,7 @@ def create_base_config() -> MBDConfig:
     """Create base configuration for optimization"""
     return MBDConfig(
         # Core settings
-        env_name="tt2d",
+        env_name="acc_tt2d",
         case="parking",
         motion_preference=0,  # No motion preference as requested
         enable_demo=False,    # No demonstration as requested
@@ -476,14 +476,22 @@ def create_base_config() -> MBDConfig:
         
         # Default values for parameters that will be optimized
         # (These will be overridden by optimizer)
-        temp_sample=0.01,
-        reward_threshold=25.0,
-        terminal_reward_threshold=1.0,
-        terminal_reward_weight=1.0,
-        steering_weight=0.05,
-        d_thr_factor=1.0,
-        k_switch=2.5,
-        hitch_angle_weight=0.05,
+        # temp_sample=0.01,
+        # reward_threshold=25.0,
+        # terminal_reward_threshold=1.0,
+        # terminal_reward_weight=1.0,
+        # steering_weight=0.05,
+        # d_thr_factor=1.0,
+        # k_switch=2.5,
+        # hitch_angle_weight=0.05,
+        terminal_reward_weight=2.9879605639678837,
+        terminal_reward_threshold=10.0,
+        temp_sample=0.000608482406362992,
+        steering_weight=0.01,
+        reward_threshold=39.305538897768706,
+        k_switch=0.1,
+        hitch_angle_weight=0.01,
+        d_thr_factor=0.5,
         
         # Disable rendering for batch optimization
         render=False,
@@ -505,14 +513,14 @@ def main():
     # Create optimizer
     optimizer = DiffusionOptimizer(
         base_config=base_config,
-        num_trials_per_eval=2,  # Statistical trials per hyperparameter evaluation
+        num_trials_per_eval=100,  # Statistical trials per hyperparameter evaluation
         study_name="mbd_parking_optimization",
         use_wandb=True
     )
     
     # Run optimization with pruning enabled
     study = optimizer.run_optimization(
-        n_trials=1000,     # Number of hyperparameter trials (reduced for testing)
+        n_trials=100,     # Number of hyperparameter trials (reduced for testing)
         timeout=72000,    # 20 hour timeout
         n_jobs=1         # Sequential execution (required for pruning to work properly)
     )

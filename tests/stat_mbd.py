@@ -571,7 +571,7 @@ def main():
     # Create base configuration for parking scenario
     config = MBDConfig(
         # Core settings
-        env_name="tt2d",
+        env_name="acc_tt2d",
         case="parking", 
         motion_preference=0,  # No motion preference
         enable_demo=False,    # No demonstration
@@ -589,13 +589,31 @@ def main():
         enable_gated_rollout_collision=True,
         enable_gated_rollout_hitch=True,
         enable_projection=False,
-        enable_guidance=False
+        enable_guidance=False,
+        terminal_reward_weight=2.9879605639678837,
+        terminal_reward_threshold=10.0,
+        temp_sample=0.000608482406362992,
+        steering_weight=0.01,
+        reward_threshold=39.305538897768706,
+        k_switch=0.1,
+        hitch_angle_weight=0.01,
+        d_thr_factor=0.5
     )
+    
+    # hyperparmeters found for tt2d, 250802
+        # terminal_reward_weight=2.9879605639678837,
+        # terminal_reward_threshold=10.0,
+        # temp_sample=0.000608482406362992,
+        # steering_weight=0.01,
+        # reward_threshold=39.305538897768706,
+        # k_switch=0.1,
+        # hitch_angle_weight=0.01,
+        # d_thr_factor=0.5
     
     # Run statistical evaluation
     results = run_statistical_evaluation(
         config=config,
-        num_trials=5,  # Small number for testing
+        num_trials=100,  # Small number for testing
         seed=42,
         verbose=True,
         show_heat_map=True  # Enable heat map visualization
