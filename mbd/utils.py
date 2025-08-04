@@ -150,7 +150,11 @@ def create_animation(env, trajectory_states, trajectory_actions, args, guided_tr
     ax.set_aspect('equal')
     #ax.grid(True)
 
-    ax.set_title("Tractor-Trailer Parking")
+    # Set title based on environment type
+    if args.env_name == "kinematic_bicycle2d":
+        ax.set_title("Kinematic Bicycle Parking")
+    else:
+        ax.set_title("Tractor-Trailer Parking")
 
     
     # Add parking space boundaries for parking scenario
@@ -257,7 +261,10 @@ def create_animation(env, trajectory_states, trajectory_actions, args, guided_tr
     # Add violation markers to legend using colored squares
     # Create square patches for violation markers
     collision_patch = Rectangle((0, 0), 1, 1, facecolor='#FF3C3C', edgecolor='#FF3C3C', linewidth=0.5)
-    jackknife_patch = Rectangle((0, 0), 1, 1, facecolor='#CC00FF', edgecolor='#CC00FF', linewidth=0.5)
+    is_bicycle = args.env_name == "kinematic_bicycle2d"
+    
+    if not is_bicycle:
+        jackknife_patch = Rectangle((0, 0), 1, 1, facecolor='#CC00FF', edgecolor='#CC00FF', linewidth=0.5)
     
     # Custom handler to ensure squares remain square in legend
     class SquareHandler(HandlerPatch):
@@ -278,14 +285,18 @@ def create_animation(env, trajectory_states, trajectory_actions, args, guided_tr
     # Get existing legend handles and labels
     handles, labels = ax.get_legend_handles_labels()
     
-    # Add violation markers to legend
-    handles.extend([collision_patch, jackknife_patch])
-    labels.extend(['Collision', 'Jackknifing'])
+    # Add violation markers to legend (only collision for bicycle, both for tractor-trailer)
+    handles.append(collision_patch)
+    labels.append('Collision')
+    handler_map = {collision_patch: SquareHandler()}
+    
+    if not is_bicycle:
+        handles.append(jackknife_patch)
+        labels.append('Jackknifing')
+        handler_map[jackknife_patch] = SquareHandler()
     
     # Create legend with custom handler for square patches
-    legend = ax.legend(handles, labels, 
-                      handler_map={collision_patch: SquareHandler(), 
-                                  jackknife_patch: SquareHandler()})
+    legend = ax.legend(handles, labels, handler_map=handler_map)
     fig.tight_layout()
     
     # Animation loop
@@ -308,13 +319,21 @@ def create_animation(env, trajectory_states, trajectory_actions, args, guided_tr
         # Update robot visualization
         env.update_animation_patches(state_np, action_np)
         
-        state_4d = state_np[:4]
+        # Handle different state dimensions
+        is_bicycle = args.env_name == "kinematic_bicycle2d"
+        if is_bicycle:
+            state_for_collision = state_np[:3]  # 3D state for bicycle
+        else:
+            state_for_collision = state_np[:4]  # 4D state for tractor-trailer
         
         # Check obstacle collision
-        obstacle_collision = env.check_obstacle_collision(state_4d, env.obs_circles, env.obs_rectangles)
+        obstacle_collision = env.check_obstacle_collision(state_for_collision, env.obs_circles, env.obs_rectangles)
         
-        # Check hitch angle violation
-        hitch_violation = env.check_hitch_violation(state_4d)
+        # Check hitch angle violation (only for tractor-trailer)
+        if is_bicycle:
+            hitch_violation = False  # No hitch angle for bicycle
+        else:
+            hitch_violation = env.check_hitch_violation(state_for_collision)
         
         # Add exclamation marks for violations
         current_position = state_np[:2]

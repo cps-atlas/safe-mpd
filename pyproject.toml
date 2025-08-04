@@ -30,6 +30,7 @@ dependencies = [
     "wandb",
     "numpy",
     "torch==2.3.1",
+    "pyqt6>=6.9.1",
 ]
 
 [tool.setuptools]

@@ -667,7 +667,7 @@ def run_diffusion(args=None, env=None):
             ax.plot(env.xref[:, 0], env.xref[:, 1], "g--", linewidth=2, label="Demonstration path", alpha=0.7)
         
         ax.legend()        
-        plt.switch_backend('TkAgg')  # Switch to interactive backend
+        #plt.switch_backend('TkAgg')  # Switch to interactive backend
         plt.draw()  # Ensure the plot is fully rendered
         plt.savefig(f"{path}/rollout.png")
         plt.savefig(f"{path}/rollout.svg")

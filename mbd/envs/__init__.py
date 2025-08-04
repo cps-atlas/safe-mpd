@@ -1,5 +1,6 @@
 from .tt2d import TractorTrailer2d
 from .acc_tt2d import AccTractorTrailer2d
+from .kinematic_bicycle2d import KinematicBicycle2d
 
 def get_env(
     env_name: str,
@@ -121,6 +122,45 @@ def get_env(
             ref_theta2_weight=ref_theta2_weight,
             a_max=a_max,
             omega_max=omega_max,
+        )
+    elif env_name == "kinematic_bicycle2d":
+        return KinematicBicycle2d(
+            case=case,
+            env_config=env_config,
+            dt=dt,
+            H=H,
+            motion_preference=motion_preference,
+            collision_penalty=collision_penalty,
+            hitch_penalty=hitch_penalty,  # Will be ignored by bicycle model
+            enable_gated_rollout_collision=enable_gated_rollout_collision,
+            enable_gated_rollout_hitch=enable_gated_rollout_hitch,  # Will be ignored by bicycle model
+            enable_projection=enable_projection,
+            enable_guidance=enable_guidance,
+            reward_threshold=reward_threshold,
+            ref_reward_threshold=ref_reward_threshold,
+            max_w_theta=max_w_theta,
+            hitch_angle_weight=hitch_angle_weight,  # Will be ignored by bicycle model
+            l1=l1,
+            l2=l2,  # Will be ignored by bicycle model
+            lh=lh,  # Will be ignored by bicycle model
+            lf1=lf1,
+            lr=lr,
+            lf2=lf2,  # Will be ignored by bicycle model
+            lr2=lr2,  # Will be ignored by bicycle model
+            tractor_width=tractor_width,
+            trailer_width=trailer_width,  # Will be ignored by bicycle model
+            v_max=v_max,
+            delta_max_deg=delta_max_deg,
+            d_thr_factor=d_thr_factor,
+            k_switch=k_switch,
+            steering_weight=steering_weight,
+            preference_penalty_weight=preference_penalty_weight,
+            heading_reward_weight=heading_reward_weight,
+            terminal_reward_threshold=terminal_reward_threshold,
+            terminal_reward_weight=terminal_reward_weight,
+            ref_pos_weight=ref_pos_weight,
+            ref_theta1_weight=ref_theta1_weight,
+            ref_theta2_weight=ref_theta2_weight,  # Will be ignored by bicycle model
         )
     else:
         raise ValueError(f"Unknown environment: {env_name}")
