@@ -116,9 +116,6 @@ class TractorTrailer2d:
         self.obs_circles = obstacles['circles']
         self.obs_rectangles = obstacles['rectangles']
         
-        # For backward compatibility with existing collision checking
-        self.obs = self.obs_circles
-        
         # Set initial and goal states based on case and user input
         if x0 is None:
             if case == "parking":
@@ -215,7 +212,7 @@ class TractorTrailer2d:
             self.x0 = jnp.array([x, y, theta1, theta2])
         
         # Invalidate JIT cache when initial conditions change
-        self._invalidate_jit_cache()
+        #mbd.planners.mbd_planner.clear_jit_cache()
 
     def set_goal_pos(self, x=None, y=None, theta1=None, theta2=None):
         """
@@ -243,19 +240,8 @@ class TractorTrailer2d:
         logging.debug(f"overwrite xg: {self.xg}")
         
         # Invalidate JIT cache when goal conditions change
-        self._invalidate_jit_cache()
-        
-    def _invalidate_jit_cache(self):
-        """Invalidate JIT function cache when environment state changes"""
-        try:
-            # Import here to avoid circular dependency
-            from mbd.planners.mbd_planner import clear_jit_cache
-            clear_jit_cache()
-            logging.debug("JIT cache invalidated due to environment state change")
-        except ImportError:
-            # If mbd_planner is not available, just pass
-            pass
-        
+        #mbd.planners.mbd_planner.clear_jit_cache()
+
     def set_rectangle_obs(self, rectangles, coordinate_mode="left-top", padding=0.0):
         """Set rectangular obstacles"""
         self.obs_rectangles = self.env.set_rectangle_obs(rectangles, coordinate_mode=coordinate_mode, padding=padding)
@@ -859,7 +845,22 @@ class TractorTrailer2d:
         trailer_frame_y = hitch_y - self.l2 * jnp.sin(theta2)
         
         return jnp.array([trailer_frame_x, trailer_frame_y])
+    
+    @partial(jax.jit, static_argnums=(0,))
+    def get_trailer_back_position(self, x):
+        """Get the trailer back position of the wheel axis. Used for cost function"""
+        px, py, theta1, theta2 = x[:4]
         
+        # Hitch point (at rear of tractor)
+        hitch_x = px - self.lh * jnp.cos(theta1)
+        hitch_y = py - self.lh * jnp.sin(theta1)
+        
+        # Trailer back position of the wheel axis
+        trailer_back_x = hitch_x - (self.l2 + self.lr2) * jnp.cos(theta2)
+        trailer_back_y = hitch_y - (self.l2 + self.lr2) * jnp.sin(theta2)
+        
+        return jnp.array([trailer_back_x, trailer_back_y])
+    
     @partial(jax.jit, static_argnums=(0,))
     def get_tractor_trailer_rectangles(self, x):
         """Get the corner points of tractor and trailer rectangles for collision checking"""
@@ -1228,9 +1229,10 @@ class TractorTrailer2d:
                 ax.add_patch(rect)
         
         # Plot trajectory
-        ax.scatter(xs[:, 0], xs[:, 1], c=range(self.H + 1), cmap="Reds", s=45)
-        ax.plot(xs[:, 0], xs[:, 1], "r-", linewidth=1.5, label="Tractor path")
-        
+        if xs.shape[0] > 0:
+            ax.scatter(xs[:, 0], xs[:, 1], c=range(self.H + 1), cmap="Reds", s=45)
+            ax.plot(xs[:, 0], xs[:, 1], "r-", linewidth=1.5, label="Tractor path")
+            
         # Plot tractor and trailer orientations (optional)
         # ax.quiver(
         #     xs[::5, 0], xs[::5, 1],

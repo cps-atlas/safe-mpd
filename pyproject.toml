@@ -21,11 +21,16 @@ dependencies = [
     "meshcat",
     "sympy",
     "gymnax",
-    "jax",
+    "jax[cuda12]",
     "distrax",
     "gputil",
     "jaxopt",
-    "flax>=0.10.7",
+    "flax",
+    "optuna",
+    "wandb",
+    "numpy",
+    "torch==2.3.1",
+    "pyqt6>=6.9.1",
 ]
 
 [tool.setuptools]
