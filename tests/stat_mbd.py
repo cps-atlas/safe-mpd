@@ -297,7 +297,7 @@ def evaluate_trial_result(final_trajectory_state: jnp.ndarray,
     """
     # Extract final state components
     final_state_4d = final_trajectory_state[:4]
-    px, py, theta1, theta2 = final_state_4d
+    px, py = final_state_4d[:2]
     
     # Calculate position errors for both tractor and trailer
     goal_px, goal_py = env.xg[0], env.xg[1]
@@ -372,50 +372,35 @@ def run_statistical_evaluation(config: MBDConfig,
             print(f"\nTrial {i+1}/{num_trials}: dx={trial_config.dx:.2f}, dy={trial_config.dy:.2f}, "
                   f"θ1={trial_config.theta1:.2f}, θ2={trial_config.theta2:.2f}")
         
-        try:
-            # Create environment for this trial
-            env = create_trial_environment(config, trial_config)
-            
-            # Run diffusion
-            rew_final, Y0, trajectory_states, timing_info = run_diffusion(args=config, env=env)
-            
-            # Evaluate trial result
-            final_state = trajectory_states[-1]  # Last state in trajectory
-            trial_result = evaluate_trial_result(final_state, env)
-            
-            # Add timing information
-            trial_result['pure_diffusion_time'] = timing_info['pure_diffusion_time']
-            trial_result['total_time'] = timing_info['total_time']
-            trial_result['final_reward'] = float(rew_final)
-            trial_result['trial_config'] = trial_config
-            
-            # Store results
-            individual_results.append(trial_result)
-            pure_diffusion_times.append(timing_info['pure_diffusion_time'])
-            
-            if trial_result['success']:
-                successful_trials += 1
-            
-            if verbose:
-                status = "SUCCESS" if trial_result['success'] else "FAILED"
-                print(f"  Result: {status} | Pos Error: {trial_result['position_error']:.3f} | "
-                      f"Time: {trial_result['pure_diffusion_time']:.3f}s | "
-                      f"Collision: {trial_result['collision']} | Jackknife: {trial_result['jackknife']}")
-                
-        except Exception as e:
-            if verbose:
-                print(f"  ERROR in trial {i+1}: {str(e)}")
-            # Record failed trial
-            individual_results.append({
-                'success': False,
-                'position_error': float('inf'),
-                'collision': True,  # Assume worst case
-                'jackknife': True,
-                'pure_diffusion_time': 0.0,
-                'error': str(e),
-                'trial_config': trial_config
-            })
-    
+        # Create environment for this trial
+        env = create_trial_environment(config, trial_config)
+        
+        # Run diffusion
+        rew_final, Y0, trajectory_states, timing_info = run_diffusion(args=config, env=env)
+        
+        # Evaluate trial result
+        final_state = trajectory_states[-1]  # Last state in trajectory
+        trial_result = evaluate_trial_result(final_state, env)
+        
+        # Add timing information
+        trial_result['pure_diffusion_time'] = timing_info['pure_diffusion_time']
+        trial_result['total_time'] = timing_info['total_time']
+        trial_result['final_reward'] = float(rew_final)
+        trial_result['trial_config'] = trial_config
+        
+        # Store results
+        individual_results.append(trial_result)
+        pure_diffusion_times.append(timing_info['pure_diffusion_time'])
+        
+        if trial_result['success']:
+            successful_trials += 1
+        
+        if verbose:
+            status = "SUCCESS" if trial_result['success'] else "FAILED"
+            print(f"  Result: {status} | Pos Error: {trial_result['position_error']:.3f} | "
+                    f"Time: {trial_result['pure_diffusion_time']:.3f}s | "
+                    f"Collision: {trial_result['collision']} | Jackknife: {trial_result['jackknife']}")
+
     # Compute aggregate statistics
     success_rate = successful_trials / num_trials
     
@@ -571,7 +556,7 @@ def main():
     # Create base configuration for parking scenario
     config = MBDConfig(
         # Core settings
-        env_name="acc_tt2d",
+        env_name="kinematic_bicycle2d",
         case="parking", 
         motion_preference=0,  # No motion preference
         enable_demo=False,    # No demonstration
@@ -590,25 +575,36 @@ def main():
         enable_gated_rollout_hitch=True,
         enable_projection=False,
         enable_guidance=False,
-        terminal_reward_weight=2.9879605639678837,
+        terminal_reward_weight=5.78395,
         terminal_reward_threshold=10.0,
-        temp_sample=0.000608482406362992,
+        temp_sample=0.0001,
         steering_weight=0.01,
-        reward_threshold=39.305538897768706,
+        reward_threshold=50.0,
         k_switch=0.1,
         hitch_angle_weight=0.01,
         d_thr_factor=0.5
     )
     
     # hyperparmeters found for tt2d, 250802
-        # terminal_reward_weight=2.9879605639678837,
+        # terminal_reward_weight=5.78395,
         # terminal_reward_threshold=10.0,
-        # temp_sample=0.000608482406362992,
+        # temp_sample=0.0001,
         # steering_weight=0.01,
-        # reward_threshold=39.305538897768706,
+        # reward_threshold=50.0,
         # k_switch=0.1,
         # hitch_angle_weight=0.01,
         # d_thr_factor=0.5
+        
+    # hyperparmeters found for acc_tt2d, 250804
+        # terminal_reward_weight=10.0,
+        # terminal_reward_threshold=10.0,
+        # temp_sample=0.0001,
+        # steering_weight=0.01,
+        # reward_threshold=10.0,
+        # k_switch=5.0,
+        # hitch_angle_weight=0.01,
+        # d_thr_factor=5.0
+        
     
     # Run statistical evaluation
     results = run_statistical_evaluation(

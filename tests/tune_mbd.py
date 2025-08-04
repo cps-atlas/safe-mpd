@@ -476,22 +476,14 @@ def create_base_config() -> MBDConfig:
         
         # Default values for parameters that will be optimized
         # (These will be overridden by optimizer)
-        # temp_sample=0.01,
-        # reward_threshold=25.0,
-        # terminal_reward_threshold=1.0,
-        # terminal_reward_weight=1.0,
-        # steering_weight=0.05,
-        # d_thr_factor=1.0,
-        # k_switch=2.5,
-        # hitch_angle_weight=0.05,
-        terminal_reward_weight=2.9879605639678837,
-        terminal_reward_threshold=10.0,
-        temp_sample=0.000608482406362992,
-        steering_weight=0.01,
-        reward_threshold=39.305538897768706,
-        k_switch=0.1,
-        hitch_angle_weight=0.01,
-        d_thr_factor=0.5,
+        temp_sample=0.01,
+        reward_threshold=25.0,
+        terminal_reward_threshold=1.0,
+        terminal_reward_weight=1.0,
+        steering_weight=0.05,
+        d_thr_factor=1.0,
+        k_switch=2.5,
+        hitch_angle_weight=0.05,
         
         # Disable rendering for batch optimization
         render=False,
