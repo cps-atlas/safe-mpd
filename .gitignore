@@ -9,6 +9,7 @@ mbd.egg-info/
 *.pyzw
 *.pyzwz
 results/
+wandb/
 
 temp.sh
 
