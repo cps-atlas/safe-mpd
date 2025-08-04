@@ -25,10 +25,12 @@ dependencies = [
     "distrax",
     "gputil",
     "jaxopt",
-    "flax>=0.10.7",
-    "optuna>=4.4.0",
-    "wandb>=0.21.0",
-    "numpy>=2.3.1",
+    "flax",
+    "optuna",
+    "wandb",
+    "numpy",
+    "torch==2.3.1",
+    "pyqt6>=6.9.1",
 ]
 
 [tool.setuptools]

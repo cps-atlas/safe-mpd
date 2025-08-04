@@ -6,8 +6,11 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
     PYTHONHASHSEED=random \
     YOUR_ENV=default_value \
-    PATH="/root/.local/bin:${PATH}"
-    
+    PATH="/workspace/.venv/bin:/root/.local/bin:${PATH}"
+
+# 3.13 has compatibility issues
+FROM python:3.11
+
 # Basic utilities
 RUN apt-get update && apt-get install -y --no-install-recommends\
     curl \
@@ -21,7 +24,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends\
 RUN ln -s /usr/bin/python3 /usr/bin/python
 
 # Install uv
-RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh \
+    && mv ~/.local/bin/uv /usr/local/bin/
 
 WORKDIR /workspace
 COPY pyproject.toml ./ 
@@ -30,15 +34,14 @@ COPY mbd/ mbd/
 # ENV PYTHONPATH="/home:/home/cbfkit:/home/cbfkit/src:${PYTHONPATH}"
 
 # Install dependencies
-ENV PATH="/workspace/.venv/bin:${PATH}"
-RUN uv venv && uv pip install .
-RUN uv sync
-
-RUN uv add shapely
-RUN uv add "jax[cuda12]"
-RUN uv add matplotlib gymnasium ipykernel gym pandas seaborn imageio control tqdm tyro meshcat sympy gymnax jax distrax gputil optuna wandb
-
-RUN uv sync
+RUN uv venv \
+    && uv pip install . \
+    && uv sync \
+    && uv add numpy \
+    && uv add "jax[cuda12]" \
+    && uv add shapely \
+    && uv add matplotlib gymnasium ipykernel gym pandas seaborn imageio control tqdm tyro meshcat sympy gymnax distrax gputil optuna wandb \
+    && uv sync
 
 # enable display
 RUN apt update && apt install -y \

@@ -10,7 +10,10 @@ services:
       - XAUTHORITY=/tmp/.docker.xauth
       - QT_X11_NO_MITSHM=1
     volumes:
-      - .:/workspace
+      - ./mbd:/workspace/mbd
+      - ./pyproject.toml:/workspace/pyproject.toml
+      - ./tests:/workspace/tests
+      - ./results:/workspace/results
       - /tmp/.X11-unix:/tmp/.X11-unix
       - ${HOME}/.Xauthority:/tmp/.docker.xauth
     deploy:

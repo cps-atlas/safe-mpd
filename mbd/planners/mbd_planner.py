@@ -50,7 +50,7 @@ def clear_jit_cache():
 @dataclass
 class MBDConfig:
     # exp
-    seed: int = 0
+    seed: int = 42
     # env
     env_name: str = "acc_tt2d"  # "tt2d" for kinematic, "acc_tt2d" for acceleration
     case: str = "parking" # "parking" for parking scenario, "navigation" for navigation scenario
@@ -667,7 +667,7 @@ def run_diffusion(args=None, env=None):
             ax.plot(env.xref[:, 0], env.xref[:, 1], "g--", linewidth=2, label="Demonstration path", alpha=0.7)
         
         ax.legend()        
-        plt.switch_backend('TkAgg')  # Switch to interactive backend
+        #plt.switch_backend('TkAgg')  # Switch to interactive backend
         plt.draw()  # Ensure the plot is fully rendered
         plt.savefig(f"{path}/rollout.png")
         plt.savefig(f"{path}/rollout.svg")
