@@ -556,7 +556,7 @@ def main():
     # Create base configuration for parking scenario
     config = MBDConfig(
         # Core settings
-        env_name="kinematic_bicycle2d",
+        env_name="tt2d",
         case="parking", 
         motion_preference=0,  # No motion preference
         enable_demo=False,    # No demonstration

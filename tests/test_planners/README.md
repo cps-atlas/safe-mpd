@@ -26,7 +26,7 @@ Each scenario has both default (no demo) and demo variants:
 
 Make sure you're in the MBD source directory:
 ```bash
-cd src/model-based-diffusion
+cd src/safe_mbd
 ```
 
 ### Run Default Tests (No Demonstration)

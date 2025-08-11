@@ -113,6 +113,8 @@ class MBDConfig:
     save_denoising_animation: bool = True # flag to enable denoising process visualization
     frame_skip: int = 1  # skip every other frame for denoising animation
     dt: float = 0.25
+    # scalability: number of trailers (0=bicycle, 1=single trailer (default), >1 n-trailer simplified cost)
+    num_trailers: int = 0
 
 
 def dict_to_config_obj(config_dict):
@@ -671,7 +673,7 @@ def run_diffusion(args=None, env=None):
         plt.draw()  # Ensure the plot is fully rendered
         plt.savefig(f"{path}/rollout.png")
         plt.savefig(f"{path}/rollout.svg")
-        plt.show()  # Show blocking so user can examine the static plot
+        #plt.show()  # Show blocking so user can examine the static plot
         
         # Close the static plot before showing animations
         if args.show_animation or args.save_denoising_animation:
@@ -803,7 +805,8 @@ if __name__ == "__main__":
         terminal_reward_weight=config.terminal_reward_weight,
         ref_pos_weight=config.ref_pos_weight,
         ref_theta1_weight=config.ref_theta1_weight,
-        ref_theta2_weight=config.ref_theta2_weight
+        ref_theta2_weight=config.ref_theta2_weight,
+        num_trailers=config.num_trailers
     )
     
     # Set initial position using geometric parameters relative to parking lot

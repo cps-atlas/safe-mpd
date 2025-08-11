@@ -8,7 +8,7 @@ import logging
 from matplotlib.transforms import Affine2D
 
 import mbd
-from .env import Env
+from ..envs.env import Env
 
 """
 Created on June 3rd, 2025
@@ -47,10 +47,14 @@ class TractorTrailer2d:
                  max_w_theta=0.75, hitch_angle_weight=0.2, l1=3.23, l2=2.9, lh=1.15, lf1=0.9, lr=1.848, lf2=1.42, lr2=3.225, 
                  tractor_width=2.0, trailer_width=2.5, v_max=3.0, delta_max_deg=55.0,
                  d_thr_factor=1.0, k_switch=2.5, steering_weight=0.05, preference_penalty_weight=0.05,
-                 heading_reward_weight=0.5, terminal_reward_threshold=10.0, terminal_reward_weight=1.0, ref_pos_weight=0.3, ref_theta1_weight=0.5, ref_theta2_weight=0.2):
+                 heading_reward_weight=0.5, terminal_reward_threshold=10.0, terminal_reward_weight=1.0, ref_pos_weight=0.3, ref_theta1_weight=0.5, ref_theta2_weight=0.2,
+                 num_trailers: int = 1):
         # Time parameters
         self.dt = dt
         self.H = H
+        
+        # scalability parameter
+        self.num_trailers = int(num_trailers)
         
         # motion preference: 0=none, 1=forward, -1=backward
         self.motion_preference = motion_preference
@@ -103,7 +107,7 @@ class TractorTrailer2d:
         self.terminal_reward_threshold = terminal_reward_threshold  # position error threshold for terminal reward
         self.terminal_reward_weight = terminal_reward_weight  # weight for terminal reward at final state
         
-
+        
         
         # Environment setup
         if env_config is None:
@@ -135,7 +139,7 @@ class TractorTrailer2d:
         else:
             self.xg = xg
         
-            
+        
         # print(f"x0: {self.x0}")
         # print(f"xg: {self.xg}")
         
@@ -143,7 +147,7 @@ class TractorTrailer2d:
         # This allows setting x0, xg, and obstacles before creating the demo
         self.xref = None
         self.rew_xref = None
-
+        
         # Animation-related attributes
         self.tractor_body = None
         self.trailer_body = None
@@ -155,7 +159,8 @@ class TractorTrailer2d:
         if hasattr(self.env, 'print_parking_layout'):
             self.env.print_parking_layout()
         
-
+        
+        
 
     def set_init_pos(self, x=None, y=None, dx=None, dy=None, theta1=0.0, theta2=0.0):
         """
@@ -683,6 +688,24 @@ class TractorTrailer2d:
           – heading + articulation near goal,
           – optional steering-effort term handled at trajectory level.
         """
+        # If more than one trailer, use simplified state-based reward (no articulation terms)
+        if self.num_trailers > 1:
+            px, py, theta1, theta2 = q
+            tractor_pos = jnp.array([px + self.l1 * jnp.cos(theta1), py + self.l1 * jnp.sin(theta1)])
+            tractor_goal = self.xg[:2]
+            d_pos = jnp.linalg.norm(tractor_pos - tractor_goal)
+            r_pos = 1.0 - (jnp.clip(d_pos, 0., self.reward_threshold) / self.reward_threshold) ** 2
+            # heading alignment to goal tractor heading only
+            thetag = self.xg[2]
+            wrap_pi = lambda a: (a + jnp.pi) % (2.*jnp.pi) - jnp.pi
+            e_theta1 = wrap_pi(theta1 - thetag)
+            r_hdg = 1.0 - (jnp.abs(e_theta1) / self.theta_max) ** 2
+            # logistic distance switch (no articulation)
+            sigmoid = lambda z: 1.0 / (1.0 + jnp.exp(-z))
+            w_theta = sigmoid((self.d_thr - d_pos) / self.k_switch)
+            w_theta = jnp.clip(w_theta, 0.0, self.max_w_theta)
+            reward = (1.0 - w_theta) * r_pos + w_theta * r_hdg
+            return reward
         # ---------------------------------------------------------------
         # 0. convenience shorthands
         px, py, theta1, theta2 = q
@@ -773,6 +796,14 @@ class TractorTrailer2d:
         Terminal reward computed at final state without logistic switch.
         Equal weighting (0.5) for position and heading rewards.
         """
+        # Simplified terminal reward for multi-trailer case: position only
+        if self.num_trailers > 1:
+            px, py, theta1, theta2 = q
+            tractor_pos = jnp.array([px + self.l1 * jnp.cos(theta1), py + self.l1 * jnp.sin(theta1)])
+            tractor_goal = self.xg[:2]
+            d_pos = jnp.linalg.norm(tractor_pos - tractor_goal)
+            r_pos = 1.0 - (jnp.clip(d_pos, 0., self.terminal_reward_threshold) / self.terminal_reward_threshold) ** 2
+            return r_pos
         # ---------------------------------------------------------------
         # 0. convenience shorthands
         px, py, theta1, theta2 = q
@@ -816,11 +847,6 @@ class TractorTrailer2d:
         # use_direct = total_err_direct < total_err_offset
         # e_theta1_wrapped = jnp.where(use_direct, e_theta1_direct, e_theta1_offset)
         # e_theta2_wrapped = jnp.where(use_direct, e_theta2_direct, e_theta2_offset)
-        
-        # # Select final angles: use wrapping only when no preference, direct otherwise
-        # no_preference = self.motion_preference == 0
-        # e_theta1 = jnp.where(no_preference, e_theta1_wrapped, e_theta1_direct)
-        # e_theta2 = jnp.where(no_preference, e_theta2_wrapped, e_theta2_direct)
         
         # r_hdg = self.heading_reward_weight * (1.0 - (jnp.abs(e_theta1) / self.theta_max) ** 2
         #               + 1.0 - (jnp.abs(e_theta2) / self.theta_max) ** 2)
