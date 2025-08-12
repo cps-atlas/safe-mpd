@@ -42,8 +42,8 @@ class TractorTrailer2d:
     Input constraint: v ∈ [-1, 1], delta ∈ [-55°, 55°]
     """
     def __init__(self, x0=None, xg=None, env_config=None, case="parking", dt=0.2, H=50, motion_preference=0, 
-                 collision_penalty=0.15, enable_gated_rollout_collision=False, hitch_penalty=0.10, 
-                 enable_gated_rollout_hitch=True, enable_projection=False, enable_guidance=False, reward_threshold=25.0, ref_reward_threshold=5.0,
+                 collision_penalty=0.15, enable_shielded_rollout_collision=False, hitch_penalty=0.10, 
+                 enable_shielded_rollout_hitch=True, enable_projection=False, enable_guidance=False, reward_threshold=25.0, ref_reward_threshold=5.0,
                  max_w_theta=0.75, hitch_angle_weight=0.2, l1=3.23, l2=2.9, lh=1.15, lf1=0.9, lr=1.848, lf2=1.42, lr2=3.225, 
                  tractor_width=2.0, trailer_width=2.5, v_max=3.0, delta_max_deg=55.0,
                  d_thr_factor=1.0, k_switch=2.5, steering_weight=0.05, preference_penalty_weight=0.05,
@@ -61,9 +61,9 @@ class TractorTrailer2d:
         
         # Collision handling parameters
         self.collision_penalty = collision_penalty
-        self.enable_gated_rollout_collision = enable_gated_rollout_collision
+        self.enable_shielded_rollout_collision = enable_shielded_rollout_collision
         self.hitch_penalty = hitch_penalty
-        self.enable_gated_rollout_hitch = enable_gated_rollout_hitch
+        self.enable_shielded_rollout_hitch = enable_shielded_rollout_hitch
         self.enable_projection = enable_projection
         self.enable_guidance = enable_guidance
         
@@ -324,20 +324,20 @@ class TractorTrailer2d:
             # Use original conditional logic for non-projection/non-guidance methods
             q_proposed = rk4(self.tractor_trailer_dynamics, q, u_scaled, self.dt)
             
-            def use_gated_rollout_fn(args):
+            def use_shielded_rollout_fn(args):
                 q_prop, = args
-                return self._step_with_gated_rollout((q, q_prop))
+                return self._step_with_shielded_rollout((q, q_prop))
             
             def use_naive_penalty_fn(args):
                 q_prop, = args
-                return self._step_without_gated_rollout(q_prop)
+                return self._step_without_shielded_rollout(q_prop)
             
-            # Select method based on gated rollout flags
-            use_gated_rollout = self.enable_gated_rollout_collision | self.enable_gated_rollout_hitch
+            # Select method based on shielded rollout flags
+            use_shielded_rollout = self.enable_shielded_rollout_collision | self.enable_shielded_rollout_hitch
             
             q_final, obstacle_collision, hitch_violation = jax.lax.cond(
-                use_gated_rollout,
-                use_gated_rollout_fn,
+                use_shielded_rollout,
+                use_shielded_rollout_fn,
                 use_naive_penalty_fn,
                 (q_proposed,)
             )
@@ -359,14 +359,14 @@ class TractorTrailer2d:
         return state.replace(pipeline_state=q_final, obs=q_final, reward=reward, done=0.0)
 
     @partial(jax.jit, static_argnums=(0,))
-    def _step_with_gated_rollout(self, data):
-        """Step function with gated rollout enabled"""
+    def _step_with_shielded_rollout(self, data):
+        """Step function with shielded rollout enabled"""
         q, q_proposed = data
-        return self.gated_rollout(q, q_proposed)
+        return self.shielded_rollout(q, q_proposed)
     
     @partial(jax.jit, static_argnums=(0,))
-    def _step_without_gated_rollout(self, q_proposed):
-        """Step function with simple forward dynamics (no gated rollout)"""
+    def _step_without_shielded_rollout(self, q_proposed):
+        """Step function with simple forward dynamics (no shielded rollout)"""
         # Check collision and hitch violations on q_proposed (for penalty computation)
         obstacle_collision = self.check_obstacle_collision(q_proposed, self.obs_circles, self.obs_rectangles)
         hitch_violation = self.check_hitch_violation(q_proposed)
@@ -374,9 +374,9 @@ class TractorTrailer2d:
         return q_proposed, obstacle_collision, hitch_violation
 
     @partial(jax.jit, static_argnums=(0,))
-    def gated_rollout(self, q, q_proposed):
+    def shielded_rollout(self, q, q_proposed):
         """
-        Gated rollout for kinematic dynamics.
+        Shielded rollout for kinematic dynamics.
         This extracts the existing safety logic into a reusable function.
         Returns both final state and collision/violation flags to avoid recomputation.
         """
@@ -384,8 +384,8 @@ class TractorTrailer2d:
         obstacle_collision = self.check_obstacle_collision(q_proposed, self.obs_circles, self.obs_rectangles)
         hitch_violation = self.check_hitch_violation(q_proposed)
         
-        q_gated = jnp.where(self.enable_gated_rollout_collision & obstacle_collision, q, q_proposed)
-        q_final = jnp.where(self.enable_gated_rollout_hitch & hitch_violation, q, q_gated)
+        q_shielded = jnp.where(self.enable_shielded_rollout_collision & obstacle_collision, q, q_proposed)
+        q_final = jnp.where(self.enable_shielded_rollout_hitch & hitch_violation, q, q_shielded)
         
         return q_final, obstacle_collision, hitch_violation
 

@@ -48,7 +48,7 @@ To be updated. But refer to the below readme (from the original repo)
 To run model-based diffusion to optimize a trajectory, run the following command:
 
 (250801) need to be rewritten, but here are the checkpoint notes.
-1. when you run tune_mbd.py, you need to install torch as well. But it does not support cuda perfectly, so it has some computation slow down. In RTX 4090, the average pure diffusion time with jax[cuda12] only was 0.56, for tt2d and with gated_rollout. This can be reproduced by running stat_mbd.py, but without the torch installed (so just the plain docker container). So, make sure if you have run tune_mbd.py, down the docker contariner and up again so that you use clean docker container (without torch). 
+1. when you run tune_mbd.py, you need to install torch as well. But it does not support cuda perfectly, so it has some computation slow down. In RTX 4090, the average pure diffusion time with jax[cuda12] only was 0.56, for tt2d and with shielded_rollout. This can be reproduced by running stat_mbd.py, but without the torch installed (so just the plain docker container). So, make sure if you have run tune_mbd.py, down the docker contariner and up again so that you use clean docker container (without torch). 
 
 ```bash
 cd mbd/planners

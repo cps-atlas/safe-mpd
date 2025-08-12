@@ -154,14 +154,14 @@ class NTrailer2d(TractorTrailer2d):
             hitch_violation = False
         else:
             q_proposed = rk4(self.n_trailer_dynamics, q, u_scaled, self.dt)
-            use_gated_rollout = self.enable_gated_rollout_collision | self.enable_gated_rollout_hitch
-            def use_gated(args):
+            use_shielded_rollout = self.enable_shielded_rollout_collision | self.enable_shielded_rollout_hitch
+            def use_shielded(args):
                 q_prop, = args
-                return self._step_with_gated_rollout((q, q_prop))
+                return self._step_with_shielded_rollout((q, q_prop))
             def use_naive(args):
                 q_prop, = args
-                return self._step_without_gated_rollout(q_prop)
-            q_final, obstacle_collision, hitch_violation = jax.lax.cond(use_gated_rollout, use_gated, use_naive, (q_proposed,))
+                return self._step_without_shielded_rollout(q_prop)
+            q_final, obstacle_collision, hitch_violation = jax.lax.cond(use_shielded_rollout, use_shielded, use_naive, (q_proposed,))
             q_reward = q_final
 
         reward = self.get_reward(q_reward)
@@ -173,22 +173,22 @@ class NTrailer2d(TractorTrailer2d):
         return state.replace(pipeline_state=q_final, obs=q_final, reward=reward, done=0.0)
 
     @partial(jax.jit, static_argnums=(0,))
-    def _step_with_gated_rollout(self, data):
+    def _step_with_shielded_rollout(self, data):
         q, q_proposed = data
-        return self.gated_rollout(q, q_proposed)
+        return self.shielded_rollout(q, q_proposed)
 
     @partial(jax.jit, static_argnums=(0,))
-    def _step_without_gated_rollout(self, q_proposed):
+    def _step_without_shielded_rollout(self, q_proposed):
         obstacle_collision = self.check_obstacle_collision(q_proposed, self.obs_circles, self.obs_rectangles)
         hitch_violation = self.check_hitch_violation(q_proposed)
         return q_proposed, obstacle_collision, hitch_violation
 
     @partial(jax.jit, static_argnums=(0,))
-    def gated_rollout(self, q, q_proposed):
+    def shielded_rollout(self, q, q_proposed):
         obstacle_collision = self.check_obstacle_collision(q_proposed, self.obs_circles, self.obs_rectangles)
         hitch_violation = self.check_hitch_violation(q_proposed)
-        q_gated = jnp.where(self.enable_gated_rollout_collision & obstacle_collision, q, q_proposed)
-        q_final = jnp.where(self.enable_gated_rollout_hitch & hitch_violation, q, q_gated)
+        q_shielded = jnp.where(self.enable_shielded_rollout_collision & obstacle_collision, q, q_proposed)
+        q_final = jnp.where(self.enable_shielded_rollout_hitch & hitch_violation, q, q_shielded)
         return q_final, obstacle_collision, hitch_violation
 
     @partial(jax.jit, static_argnums=(0,))

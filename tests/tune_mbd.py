@@ -205,8 +205,8 @@ class DiffusionOptimizer:
             # Collision handling (fixed)
             collision_penalty=self.base_config.collision_penalty,  # Fixed
             hitch_penalty=self.base_config.hitch_penalty,  # Fixed
-            enable_gated_rollout_collision=self.base_config.enable_gated_rollout_collision,
-            enable_gated_rollout_hitch=self.base_config.enable_gated_rollout_hitch,
+            enable_shielded_rollout_collision=self.base_config.enable_shielded_rollout_collision,
+            enable_shielded_rollout_hitch=self.base_config.enable_shielded_rollout_hitch,
             enable_projection=self.base_config.enable_projection,
             enable_guidance=self.base_config.enable_guidance,
             # Reward thresholds (tunable)

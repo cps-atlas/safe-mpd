@@ -68,8 +68,8 @@ class MBDConfig:
     # collision handling
     collision_penalty: float = 0.15  # penalty applied for obstacle collisions
     hitch_penalty: float = 0.10  # penalty applied for hitch angle violations
-    enable_gated_rollout_collision: bool = True  # whether to use gated rollout for obstacle collision
-    enable_gated_rollout_hitch: bool = True  # whether to use gated rollout for hitch violation
+    enable_shielded_rollout_collision: bool = True  # whether to use shielded rollout for obstacle collision
+    enable_shielded_rollout_hitch: bool = True  # whether to use shielded rollout for hitch violation
     enable_projection: bool = False  # whether to use projection to safe set
     enable_guidance: bool = False  # whether to use gradient descent guidance for safety
     # physical parameters
@@ -143,9 +143,9 @@ def dict_to_config_obj(config_dict):
         enable_demo=bool(config_dict["enable_demo"]),
         motion_preference=int(config_dict.get("motion_preference", 0)),
         collision_penalty=float(config_dict.get("collision_penalty", 0.15)),
-        enable_gated_rollout_collision=bool(config_dict.get("enable_gated_rollout_collision", True)),
+        enable_shielded_rollout_collision=bool(config_dict.get("enable_shielded_rollout_collision", True)),
         hitch_penalty=float(config_dict.get("hitch_penalty", 0.10)),
-        enable_gated_rollout_hitch=bool(config_dict.get("enable_gated_rollout_hitch", True)),
+        enable_shielded_rollout_hitch=bool(config_dict.get("enable_shielded_rollout_hitch", True)),
         enable_projection=bool(config_dict.get("enable_projection", False)),
         enable_guidance=bool(config_dict.get("enable_guidance", False)),
         reward_threshold=float(config_dict.get("reward_threshold", 25.0)),
@@ -772,9 +772,9 @@ if __name__ == "__main__":
         H=config.Hsample,
         motion_preference=config.motion_preference,
         collision_penalty=config.collision_penalty,
-        enable_gated_rollout_collision=config.enable_gated_rollout_collision,
+        enable_shielded_rollout_collision=config.enable_shielded_rollout_collision,
         hitch_penalty=config.hitch_penalty,
-        enable_gated_rollout_hitch=config.enable_gated_rollout_hitch,
+        enable_shielded_rollout_hitch=config.enable_shielded_rollout_hitch,
         enable_projection=config.enable_projection,
         enable_guidance=config.enable_guidance,
         reward_threshold=config.reward_threshold,
