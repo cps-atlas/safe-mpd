@@ -10,6 +10,7 @@ from matplotlib.patches import Patch, Rectangle
 from matplotlib.legend_handler import HandlerPatch
 from tqdm import tqdm
 import mbd
+import jax.numpy as jnp
 
 
 # evaluate the diffused uss
@@ -25,8 +26,10 @@ def rollout_us(step_env, state, us):
     def step(state, u):
         state = step_env(state, u)
         return state, (state.reward, state.pipeline_state)
-
-    final_state, (rew_seq, pipeline_state_seq) = jax.lax.scan(step, state, us) # NOTE: returns stack of (rew, pipeline_state). _ is the final carry, which is final state in this case
+    # Warm-initialize carry to match shape if necessary by a no-op step
+    zero_u = jnp.zeros_like(us[0]) if us.shape[0] > 0 else jnp.zeros((2,))
+    state_init = step_env(state, zero_u)
+    final_state, (rew_seq, pipeline_state_seq) = jax.lax.scan(step, state_init, us) # NOTE: returns stack of (rew, pipeline_state). _ is the final carry, which is final state in this case
     return rew_seq, pipeline_state_seq
 
 def rollout_us_with_terminal(step_env, env, state, us):
@@ -34,8 +37,9 @@ def rollout_us_with_terminal(step_env, env, state, us):
     def step(state, u):
         state = step_env(state, u)
         return state, (state.reward, state.pipeline_state)
-
-    final_state, (rew_seq, pipeline_state_seq) = jax.lax.scan(step, state, us)
+    zero_u = jnp.zeros_like(us[0]) if us.shape[0] > 0 else jnp.zeros((2,))
+    state_init = step_env(state, zero_u)
+    final_state, (rew_seq, pipeline_state_seq) = jax.lax.scan(step, state_init, us)
     
     # Compute mean of stage rewards first, then add separate terminal reward
     stage_reward_mean = rew_seq.mean()
@@ -321,10 +325,13 @@ def create_animation(env, trajectory_states, trajectory_actions, args, guided_tr
         
         # Handle different state dimensions
         is_bicycle = args.env_name == "kinematic_bicycle2d"
+        is_multi_trailer = hasattr(env, 'num_trailers') and getattr(env, 'num_trailers', 1) >= 2
         if is_bicycle:
-            state_for_collision = state_np[:3]  # 3D state for bicycle
+            state_for_collision = state_np[:3]
+        elif is_multi_trailer:
+            state_for_collision = state_np  # use full N-trailer state
         else:
-            state_for_collision = state_np[:4]  # 4D state for tractor-trailer
+            state_for_collision = state_np[:4]
         
         # Check obstacle collision
         obstacle_collision = env.check_obstacle_collision(state_for_collision, env.obs_circles, env.obs_rectangles)

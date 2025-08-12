@@ -52,7 +52,7 @@ class MBDConfig:
     # exp
     seed: int = 42
     # env
-    env_name: str = "acc_tt2d"  # "tt2d" for kinematic, "acc_tt2d" for acceleration
+    env_name: str = "n_trailer2d"  # "tt2d" for kinematic, "acc_tt2d" for acceleration
     case: str = "parking" # "parking" for parking scenario, "navigation" for navigation scenario
     verbose: bool = False
     # diffusion
@@ -110,11 +110,11 @@ class MBDConfig:
     render: bool = True
     save_animation: bool = True # flag to enable animation saving
     show_animation: bool = True  # flag to show animation during creation
-    save_denoising_animation: bool = True # flag to enable denoising process visualization
+    save_denoising_animation: bool = False # flag to enable denoising process visualization
     frame_skip: int = 1  # skip every other frame for denoising animation
     dt: float = 0.25
     # scalability: number of trailers (0=bicycle, 1=single trailer (default), >1 n-trailer simplified cost)
-    num_trailers: int = 0
+    num_trailers: int = 3
 
 
 def dict_to_config_obj(config_dict):
@@ -248,7 +248,7 @@ def run_diffusion(args=None, env=None):
     # NOTE: a, b = jax.random.split(b) is a standard way to use random. always use a as random variable, not b. 
     rng, rng_reset = jax.random.split(rng)  # NOTE: rng_reset should never be changed.
     state_init = env.reset(rng_reset)
-    #print(f"state_init: {state_init}")
+    print(f"state_init: {state_init}")
     jit_setup_time = time.time() - jit_setup_start_time
     
     # Simple cache key for reverse_once function
@@ -526,7 +526,7 @@ def run_diffusion(args=None, env=None):
     xs = xs.at[0].set(state_init.pipeline_state)  # Set initial state
     
     # Set visualization mode for guidance (to get guided states in trajectory)
-    if hasattr(env, 'visualization_mode'):
+    if args.enable_guidance and hasattr(env, 'visualization_mode'):
         logging.debug("Computing guided trajectory with visualization_mode=True...")
         
         # Use explicit visualization_mode parameter instead of trying to force recompilation
@@ -545,6 +545,8 @@ def run_diffusion(args=None, env=None):
         step_env_jit_guided = step_env_jit  # Use original if no visualization_mode
     
     state = state_init
+    
+    print(state.pipeline_state)
     
     # Process trajectory states using pre-allocated arrays and guided step function
     for t in range(Y0.shape[0]):
@@ -813,6 +815,8 @@ if __name__ == "__main__":
     # dx: distance from tractor front face to target parking space center
     # dy: distance from tractor to parking lot entrance line
     env.set_init_pos(dx=2.0, dy=1.0, theta1=0, theta2=0)
+    if config.num_trailers > 1:
+        env.set_init_pos(dx=-7.0, dy=8.0, theta1=jnp.pi/10, theta2=jnp.pi/8)
     if config.motion_preference == -2:
         env.set_init_pos(dx=-12.0, dy=1.0, theta1=jnp.pi, theta2=jnp.pi)
     # Set goal angles based on motion preference

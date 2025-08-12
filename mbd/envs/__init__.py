@@ -1,6 +1,7 @@
 from ..robots.tt2d import TractorTrailer2d
 from ..robots.acc_tt2d import AccTractorTrailer2d
 from ..robots.kinematic_bicycle2d import KinematicBicycle2d
+from ..robots.n_trailer2d import NTrailer2d
 
 def get_env(
     env_name: str,
@@ -45,7 +46,6 @@ def get_env(
     num_trailers: int = 1,
 ):
     if env_name == "tt2d":
-        # If the user requests zero trailers, delegate to the bicycle model
         if num_trailers == 0:
             return KinematicBicycle2d(
                 case=case,
@@ -85,6 +85,47 @@ def get_env(
                 ref_theta1_weight=ref_theta1_weight,
                 ref_theta2_weight=ref_theta2_weight,
             )
+        if num_trailers >= 2:
+            return NTrailer2d(
+                num_trailers=num_trailers,
+                case=case,
+                env_config=env_config,
+                dt=dt,
+                H=H,
+                motion_preference=motion_preference,
+                collision_penalty=collision_penalty,
+                hitch_penalty=hitch_penalty,
+                enable_gated_rollout_collision=enable_gated_rollout_collision,
+                enable_gated_rollout_hitch=enable_gated_rollout_hitch,
+                enable_projection=enable_projection,
+                enable_guidance=enable_guidance,
+                reward_threshold=reward_threshold,
+                ref_reward_threshold=ref_reward_threshold,
+                max_w_theta=max_w_theta,
+                hitch_angle_weight=hitch_angle_weight,
+                l1=l1,
+                l2=l2,
+                lh=lh,
+                lf1=lf1,
+                lr=lr,
+                lf2=lf2,
+                lr2=lr2,
+                tractor_width=tractor_width,
+                trailer_width=trailer_width,
+                v_max=v_max,
+                delta_max_deg=delta_max_deg,
+                d_thr_factor=d_thr_factor,
+                k_switch=k_switch,
+                steering_weight=steering_weight,
+                preference_penalty_weight=preference_penalty_weight,
+                heading_reward_weight=heading_reward_weight,
+                terminal_reward_threshold=terminal_reward_threshold,
+                terminal_reward_weight=terminal_reward_weight,
+                ref_pos_weight=ref_pos_weight,
+                ref_theta1_weight=ref_theta1_weight,
+                ref_theta2_weight=ref_theta2_weight,
+            )
+        # default single-trailer
         return TractorTrailer2d(
             case=case,
             env_config=env_config,
@@ -122,7 +163,46 @@ def get_env(
             ref_pos_weight=ref_pos_weight,
             ref_theta1_weight=ref_theta1_weight,
             ref_theta2_weight=ref_theta2_weight,
+        )
+    elif env_name == "n_trailer2d":
+        return NTrailer2d(
             num_trailers=num_trailers,
+            case=case,
+            env_config=env_config,
+            dt=dt,
+            H=H,
+            motion_preference=motion_preference,
+            collision_penalty=collision_penalty,
+            hitch_penalty=hitch_penalty,
+            enable_gated_rollout_collision=enable_gated_rollout_collision,
+            enable_gated_rollout_hitch=enable_gated_rollout_hitch,
+            enable_projection=enable_projection,
+            enable_guidance=enable_guidance,
+            reward_threshold=reward_threshold,
+            ref_reward_threshold=ref_reward_threshold,
+            max_w_theta=max_w_theta,
+            hitch_angle_weight=hitch_angle_weight,
+            l1=l1,
+            l2=l2,
+            lh=lh,
+            lf1=lf1,
+            lr=lr,
+            lf2=lf2,
+            lr2=lr2,
+            tractor_width=tractor_width,
+            trailer_width=trailer_width,
+            v_max=v_max,
+            delta_max_deg=delta_max_deg,
+            d_thr_factor=d_thr_factor,
+            k_switch=k_switch,
+            steering_weight=steering_weight,
+            preference_penalty_weight=preference_penalty_weight,
+            heading_reward_weight=heading_reward_weight,
+            terminal_reward_threshold=terminal_reward_threshold,
+            terminal_reward_weight=terminal_reward_weight,
+            ref_pos_weight=ref_pos_weight,
+            ref_theta1_weight=ref_theta1_weight,
+            ref_theta2_weight=ref_theta2_weight,
         )
     elif env_name == "acc_tt2d":
         return AccTractorTrailer2d(

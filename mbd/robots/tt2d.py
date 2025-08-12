@@ -384,9 +384,6 @@ class TractorTrailer2d:
         obstacle_collision = self.check_obstacle_collision(q_proposed, self.obs_circles, self.obs_rectangles)
         hitch_violation = self.check_hitch_violation(q_proposed)
         
-        # Apply different projections based on type of violation
-        # Obstacle collision: use gated rollout collision setting
-        # Hitch violation: use gated rollout hitch setting
         q_gated = jnp.where(self.enable_gated_rollout_collision & obstacle_collision, q, q_proposed)
         q_final = jnp.where(self.enable_gated_rollout_hitch & hitch_violation, q, q_gated)
         
@@ -688,24 +685,6 @@ class TractorTrailer2d:
           – heading + articulation near goal,
           – optional steering-effort term handled at trajectory level.
         """
-        # If more than one trailer, use simplified state-based reward (no articulation terms)
-        if self.num_trailers > 1:
-            px, py, theta1, theta2 = q
-            tractor_pos = jnp.array([px + self.l1 * jnp.cos(theta1), py + self.l1 * jnp.sin(theta1)])
-            tractor_goal = self.xg[:2]
-            d_pos = jnp.linalg.norm(tractor_pos - tractor_goal)
-            r_pos = 1.0 - (jnp.clip(d_pos, 0., self.reward_threshold) / self.reward_threshold) ** 2
-            # heading alignment to goal tractor heading only
-            thetag = self.xg[2]
-            wrap_pi = lambda a: (a + jnp.pi) % (2.*jnp.pi) - jnp.pi
-            e_theta1 = wrap_pi(theta1 - thetag)
-            r_hdg = 1.0 - (jnp.abs(e_theta1) / self.theta_max) ** 2
-            # logistic distance switch (no articulation)
-            sigmoid = lambda z: 1.0 / (1.0 + jnp.exp(-z))
-            w_theta = sigmoid((self.d_thr - d_pos) / self.k_switch)
-            w_theta = jnp.clip(w_theta, 0.0, self.max_w_theta)
-            reward = (1.0 - w_theta) * r_pos + w_theta * r_hdg
-            return reward
         # ---------------------------------------------------------------
         # 0. convenience shorthands
         px, py, theta1, theta2 = q
@@ -713,8 +692,6 @@ class TractorTrailer2d:
         # modify the tractor_pos to be the center of the tractor
         tractor_pos           = jnp.array([px + self.l1 * jnp.cos(theta1), py + self.l1 * jnp.sin(theta1)])
         tractor_goal          = self.xg[:2]
-        
-        #jax.debug.print("tractor_goal: {x}, {y}", x=tractor_goal[0], y=tractor_goal[1])
         
         # Compute trailer position from current state
         trailer_pos = self.get_trailer_position(q)
@@ -796,14 +773,6 @@ class TractorTrailer2d:
         Terminal reward computed at final state without logistic switch.
         Equal weighting (0.5) for position and heading rewards.
         """
-        # Simplified terminal reward for multi-trailer case: position only
-        if self.num_trailers > 1:
-            px, py, theta1, theta2 = q
-            tractor_pos = jnp.array([px + self.l1 * jnp.cos(theta1), py + self.l1 * jnp.sin(theta1)])
-            tractor_goal = self.xg[:2]
-            d_pos = jnp.linalg.norm(tractor_pos - tractor_goal)
-            r_pos = 1.0 - (jnp.clip(d_pos, 0., self.terminal_reward_threshold) / self.terminal_reward_threshold) ** 2
-            return r_pos
         # ---------------------------------------------------------------
         # 0. convenience shorthands
         px, py, theta1, theta2 = q
