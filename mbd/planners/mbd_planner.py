@@ -114,7 +114,7 @@ class MBDConfig:
     frame_skip: int = 1  # skip every other frame for denoising animation
     dt: float = 0.25
     # scalability: number of trailers (0=bicycle, 1=single trailer (default), >1 n-trailer simplified cost)
-    num_trailers: int = 3
+    num_trailers: int = 2
 
 
 def dict_to_config_obj(config_dict):
@@ -816,7 +816,7 @@ if __name__ == "__main__":
     # dy: distance from tractor to parking lot entrance line
     env.set_init_pos(dx=2.0, dy=1.0, theta1=0, theta2=0)
     if config.num_trailers > 1:
-        env.set_init_pos(dx=-7.0, dy=8.0, theta1=jnp.pi/10, theta2=jnp.pi/8)
+        env.set_init_pos(dx=23.0, dy=8.0, theta1=-jnp.pi/8, theta2=0.0)
     if config.motion_preference == -2:
         env.set_init_pos(dx=-12.0, dy=1.0, theta1=jnp.pi, theta2=jnp.pi)
     # Set goal angles based on motion preference
