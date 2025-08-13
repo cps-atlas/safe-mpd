@@ -38,15 +38,16 @@ COPY pyproject.toml ./
 # Ensure JAX CUDA wheels are discoverable
 ENV PIP_FIND_LINKS=https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
 
-# Create virtualenv and install dependencies using uv sync.
-# This will generate uv.lock if it doesn't exist and install packages.
-RUN uv venv && uv sync
+# 1. Create venv and install ONLY external dependencies from pyproject.toml
+# This keeps this layer cached even when your source code changes.
+RUN uv venv && uv pip install -r pyproject.toml
 
-# Copy the project code and install the package in editable mode
+# 2. Now, copy the project source code
 COPY mbd/ mbd/
+
+# 3. Finally, install your local package in editable mode
 RUN uv pip install -e .
 
-# # enable display
 # Install GUI-related dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     x11-apps libgl1 libx11-6 libxext6 libxrender1 libsm6 libxft2 \
