@@ -61,32 +61,16 @@ class NTrailer2d(TractorTrailer2d):
     @partial(jax.jit, static_argnums=(0,))
     def n_trailer_dynamics(self, x, u):
         v, delta = u
-        # Normalize state length to expected 3+N using static shape branching
-        expected_len = 3 + self.num_trailers
-        m = x.shape[0]
-        if m == expected_len:
-            x_full = x
-        elif m > expected_len:
-            # Truncate extra trailer angles
-            x_full = jnp.concatenate([x[:3], x[3:3 + self.num_trailers]])
-        else:
-            # Pad missing trailer angles by repeating last available angle (or theta0 if none)
-            thetas_raw = x[3:] if m > 3 else jnp.array([x[2]])
-            raw_len = thetas_raw.shape[0]
-            pad_len = self.num_trailers - raw_len
-            pad_val = thetas_raw[-1]
-            thetas_full = jnp.concatenate([thetas_raw, jnp.full((pad_len,), pad_val)])
-            x_full = jnp.concatenate([x[:3], thetas_full])
-        px, py = x_full[0], x_full[1]
-        theta0 = x_full[2]
-        thetas = x_full[3: 3 + self.num_trailers]
+        px, py = x[0], x[1]
+        theta0 = x[2]
+        thetas = x[3: 3 + self.num_trailers]
 
         px_dot = v * jnp.cos(theta0)
         py_dot = v * jnp.sin(theta0)
         theta0_dot = (v / self.l1) * jnp.tan(delta)
 
         # Prepare output array for trailer angle rates
-        trailer_dots = jnp.zeros((self.num_trailers,), dtype=x_full.dtype)
+        trailer_dots = jnp.zeros((self.num_trailers,), dtype=x.dtype)
 
         def loop(i, acc):
             prev_theta, prev_dot, prev_axle_speed, dots = acc
@@ -97,7 +81,7 @@ class NTrailer2d(TractorTrailer2d):
             theta_i_dot = jnp.where(
                 i == 0,
                 (v / L_i) * (jnp.sin(dtheta) - (self.lh / self.l1) * jnp.cos(dtheta) * jnp.tan(delta)),
-                (prev_axle_speed / L_i) * jnp.sin(dtheta) + (self.lh / L_i) * prev_dot * jnp.cos(dtheta)
+                (prev_axle_speed / L_i) * jnp.sin(dtheta) - (self.lh / L_i) * prev_dot * jnp.cos(dtheta)
             )
             # Axle speed at this trailer (for next stage): project hitch velocity along body
             axle_speed_i = jnp.where(
