@@ -257,6 +257,7 @@ def create_trial_environment(base_config: MBDConfig, trial_config: TrialConfig):
         ref_pos_weight=base_config.ref_pos_weight,
         ref_theta1_weight=base_config.ref_theta1_weight,
         ref_theta2_weight=base_config.ref_theta2_weight,
+        num_trailers=base_config.num_trailers,
     )
     
     
@@ -556,7 +557,7 @@ def main():
     # Create base configuration for parking scenario
     config = MBDConfig(
         # Core settings
-        env_name="tt2d",
+        env_name="acc_tt2d",
         case="parking", 
         motion_preference=0,  # No motion preference
         enable_demo=False,    # No demonstration
@@ -565,9 +566,9 @@ def main():
         Hsample=50,
         Ndiffuse=100,
         # Disable rendering for batch evaluation
-        render=False,
+        render=True,
         save_animation=False,
-        show_animation=False,
+        show_animation=True,
         save_denoising_animation=False,
         verbose=False,
         # Algorithm
@@ -582,7 +583,8 @@ def main():
         reward_threshold=50.0,
         k_switch=0.1,
         hitch_angle_weight=0.01,
-        d_thr_factor=0.5
+        d_thr_factor=0.5,
+        num_trailers=1
     )
     
     # hyperparmeters found for tt2d, 250802

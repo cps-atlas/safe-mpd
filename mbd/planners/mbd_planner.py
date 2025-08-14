@@ -52,7 +52,7 @@ class MBDConfig:
     # exp
     seed: int = 42
     # env
-    env_name: str = "n_trailer2d"  # "tt2d" for kinematic, "acc_tt2d" for acceleration
+    env_name: str = "acc_tt2d"  # "tt2d" for kinematic, "acc_tt2d" for acceleration
     case: str = "parking" # "parking" for parking scenario, "navigation" for navigation scenario
     verbose: bool = False
     # diffusion
@@ -114,7 +114,7 @@ class MBDConfig:
     frame_skip: int = 1  # skip every other frame for denoising animation
     dt: float = 0.25
     # scalability: number of trailers (0=bicycle, 1=single trailer (default), >1 n-trailer simplified cost)
-    num_trailers: int = 3
+    num_trailers: int =1
 
 
 def dict_to_config_obj(config_dict):
@@ -248,7 +248,6 @@ def run_diffusion(args=None, env=None):
     # NOTE: a, b = jax.random.split(b) is a standard way to use random. always use a as random variable, not b. 
     rng, rng_reset = jax.random.split(rng)  # NOTE: rng_reset should never be changed.
     state_init = env.reset(rng_reset)
-    print(f"state_init: {state_init}")
     jit_setup_time = time.time() - jit_setup_start_time
     
     # Simple cache key for reverse_once function
@@ -671,11 +670,11 @@ def run_diffusion(args=None, env=None):
             ax.plot(env.xref[:, 0], env.xref[:, 1], "g--", linewidth=2, label="Demonstration path", alpha=0.7)
         
         ax.legend()        
-        #plt.switch_backend('TkAgg')  # Switch to interactive backend
+        plt.switch_backend('TkAgg')  # Switch to interactive backend
         plt.draw()  # Ensure the plot is fully rendered
         plt.savefig(f"{path}/rollout.png")
         plt.savefig(f"{path}/rollout.svg")
-        #plt.show()  # Show blocking so user can examine the static plot
+        plt.show()  # Show blocking so user can examine the static plot
         
         # Close the static plot before showing animations
         if args.show_animation or args.save_denoising_animation:
@@ -816,7 +815,7 @@ if __name__ == "__main__":
     # dy: distance from tractor to parking lot entrance line
     env.set_init_pos(dx=2.0, dy=1.0, theta1=0, theta2=0)
     if config.num_trailers > 1:
-        env.set_init_pos(dx=33.0, dy=15.0, theta1=-jnp.pi/8, theta2=0.0)
+        env.set_init_pos(dx=25.0, dy=15.0, theta1=-jnp.pi/8, theta2=0.0)
     if config.motion_preference == -2:
         env.set_init_pos(dx=-12.0, dy=1.0, theta1=jnp.pi, theta2=jnp.pi)
     # Set goal angles based on motion preference

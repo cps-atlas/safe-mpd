@@ -12,7 +12,8 @@ Visulization for the diffusion, and some functions for model-based diffusion (or
 
 
 class Env:
-    def __init__(self, width=45.0, height=45.0, case="parking", parking_config=None, resolution=0.1):
+    def __init__(self, width=32.0, height=32.0, case="parking", parking_config=None, resolution=0.1):
+        # 32 by 32 for one trailer, 45 by 45 for n trailers
         self.width = width
         self.height = height
         self.resolution = resolution
@@ -73,8 +74,8 @@ class Env:
             [0.0, 15.0, 30.0, 1.0, 0.0],
             [0.0, -14.0, 30.0, 1.0, 0.0]
         ]
-        obs_rectangles = [
-        ]
+        # obs_rectangles = [
+        # ]
         return obs_rectangles
     
     def set_obs_circle_parking(self, parking_config):
