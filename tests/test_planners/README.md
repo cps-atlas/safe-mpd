@@ -7,7 +7,7 @@ This directory contains comprehensive tests for the Model-Based Diffusion (MBD) 
 ### Test Categories
 
 1. **Default Tests**: Tests that rely purely on the reward function without demonstration guidance (default behavior)
-2. **Demo Tests**: Tests that use demonstration trajectories to guide the diffusion process (special case)
+2. **Demo Tests** (To be updated): Tests that use demonstration trajectories to guide the diffusion process (special case)
 3. **Utility Tests**: Tests for configuration management and test infrastructure
 
 ### Available Test Scenarios
@@ -21,13 +21,6 @@ Each scenario has both default (no demo) and demo variants:
 - `parking_enforce_backward` / `parking_enforce_backward_demo`: Strict backward enforcement
 
 ## Running Tests
-
-### Prerequisites
-
-Make sure you're in the MBD source directory:
-```bash
-cd src/safe_mbd
-```
 
 ### Run Default Tests (No Demonstration)
 ```bash
@@ -168,7 +161,7 @@ Each test validates:
 
 ### Adding New Test Scenarios
 
-1. **Add to TEST_SCENARIOS** in `fixtures/test_configs.py` (no demo by default):
+1. **Add to TEST_SCENARIOS** in `fixtures/test_configs.py` :
 ```python
 "new_scenario": TestConfig(
     test_name="new_scenario",
@@ -217,7 +210,6 @@ def test_custom_environment(self):
 1. **JAX Compilation Warnings**: Normal for first run, cached afterwards
 2. **Test Timeout**: Increase `timeout_seconds` in TestConfig
 3. **Visualization Not Showing**: Make sure X11 forwarding is enabled if using SSH
-4. **Import Errors**: Ensure you're running from the correct directory
 
 ### Debug Mode
 
@@ -225,16 +217,6 @@ Enable verbose output:
 ```bash
 python tests/test_planners/run_tests.py --single test_name --visualize
 ```
-
-### Performance Tips
-
-- Default tests (no demo) are faster and good for development
-- Use demo tests to evaluate demonstration effectiveness
-- Run single tests during debugging
-- Use `--compare` to evaluate default vs demo performance
-- Enable visualization only when needed
-
-## Integration with CI/CD
 
 ### Quick Test Suite
 ```bash
@@ -247,25 +229,3 @@ python tests/test_planners/run_tests.py --demo
 # Full test suite
 python tests/test_planners/run_tests.py --all
 ```
-
-### Test Behavior
-
-- **Default behavior** (no flags): Run default tests (no demonstration) - fastest
-- **--demo**: Run demo tests (with demonstration) - slower but better performance
-- **--all**: Run everything (default + demo + utility) - comprehensive
-
-### Expected Test Times
-- Single test: ~30-60 seconds
-- Default tests: ~3-5 minutes total (faster without demo)
-- Demo tests: ~5-10 minutes total (slower with demo generation)
-- All tests: ~8-15 minutes total
-
-## Design Philosophy
-
-The test suite follows the principle that **no demonstration should be the default behavior**:
-
-1. **Baseline Performance**: Default tests establish baseline performance without demonstration
-2. **Enhanced Performance**: Demo tests show the benefit of demonstration guidance
-3. **Easy Comparison**: Simple comparison between default and demo variants
-4. **Development Focus**: Developers typically work with faster default tests
-5. **Production Evaluation**: Demo tests validate demonstration effectiveness 
