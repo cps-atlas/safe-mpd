@@ -118,7 +118,8 @@ def get_default_parking_config():
         'space_width': 3.5,     # Width of each parking space
         'space_length': 7.0,    # Length of each parking space
         'parking_y_offset': 4.0, # Distance from start area to parking lot
-        'occupied_spaces': [1, 2, 3, 5, 6, 7, 9, 10, 11, 13, 14, 15],  # 1-indexed occupied spaces
+        #'occupied_spaces': [1, 2, 3, 5, 6, 7, 9, 10, 11, 13, 14, 15],  # 1-indexed occupied spaces
+        'occupied_spaces': [3, 5, 11, 13],  # 1-indexed occupied spaces
         'target_spaces': [4, 12],  # Target spaces: tractor in 3, trailer in 11
         'obstacle_radius': 1.0,   # Radius of obstacles in occupied spaces
     }
@@ -131,8 +132,10 @@ def create_rectangular_obstacles():
     Returns:
         List of rectangular obstacles [x_center, y_center, width, height, rotation]
     """
+    # obs_rectangles = [
+    #     [0.0, -14.0, 30.0, 1.0, 0.0]   # Bottom boundary wall
+    # ]
     obs_rectangles = [
-        [0.0, -14.0, 30.0, 1.0, 0.0]   # Bottom boundary wall
     ]
     return obs_rectangles
 
@@ -282,22 +285,23 @@ def create_trial_environment(base_config: MBDConfig, trial_config: TrialConfig):
     return env
 
 
-def evaluate_trial_result(final_trajectory_state: jnp.ndarray, 
-                         env, 
+def evaluate_trial_result(trajectory_states: jnp.ndarray,
+                         env,
                          goal_position_threshold: float = 4.0) -> Dict:
     """
     Evaluate the results of a single diffusion trial.
     
     Args:
-        final_trajectory_state: Final state from trajectory [px, py, theta1, theta2, ...]
+        trajectory_states: Full trajectory states array of shape (T, state_dim)
         env: Environment used for the trial
         goal_position_threshold: Distance threshold for success determination
         
     Returns:
         Dictionary with trial evaluation metrics
     """
-    # Extract final state components
-    final_state_4d = final_trajectory_state[:4]
+    # Use final state for position error computation
+    final_state = trajectory_states[-1]
+    final_state_4d = final_state[:4]
     px, py = final_state_4d[:2]
     
     # Calculate position errors for both tractor and trailer
@@ -314,9 +318,18 @@ def evaluate_trial_result(final_trajectory_state: jnp.ndarray,
     # Use minimum position error (better of tractor/trailer positioning)
     final_position_error = min(tractor_pos_error, trailer_pos_error)
     
-    # Check constraint violations
-    obstacle_collision = env.check_obstacle_collision(final_state_4d, env.obs_circles, env.obs_rectangles)
-    hitch_violation = env.check_hitch_violation(final_state_4d)
+    # Check constraint violations across the entire trajectory
+    obstacle_collision = False
+    hitch_violation = False
+    for t in range(trajectory_states.shape[0]):
+        state_4d = trajectory_states[t][:4]
+        # If either violation occurs at any timestep, mark as True
+        if env.check_obstacle_collision(state_4d, env.obs_circles, env.obs_rectangles):
+            obstacle_collision = True
+        if env.check_hitch_violation(state_4d):
+            hitch_violation = True
+        if obstacle_collision and hitch_violation:
+            break
     
     # Determine success
     is_successful = (final_position_error <= goal_position_threshold and 
@@ -330,7 +343,7 @@ def evaluate_trial_result(final_trajectory_state: jnp.ndarray,
         'trailer_error': float(trailer_pos_error),
         'collision': bool(obstacle_collision),
         'jackknife': bool(hitch_violation),
-        'final_state': final_trajectory_state
+        'final_state': final_state
     }
 
 
@@ -379,9 +392,8 @@ def run_statistical_evaluation(config: MBDConfig,
         # Run diffusion
         rew_final, Y0, trajectory_states, timing_info = run_diffusion(args=config, env=env)
         
-        # Evaluate trial result
-        final_state = trajectory_states[-1]  # Last state in trajectory
-        trial_result = evaluate_trial_result(final_state, env)
+        # Evaluate trial result using entire trajectory for constraint checks
+        trial_result = evaluate_trial_result(trajectory_states, env)
         
         # Add timing information
         trial_result['pure_diffusion_time'] = timing_info['pure_diffusion_time']
@@ -559,12 +571,12 @@ def main():
     # Create base configuration for parking scenario
     config = MBDConfig(
         # Core settings
-        env_name="tt2d",
+        env_name="kinematic_bicycle2d",
         case="parking", 
         motion_preference=0,  # No motion preference
         enable_demo=False,    # No demonstration
         # Reduce computational cost for testing
-        Nsample=20000,
+        Nsample=20,
         Hsample=50,
         Ndiffuse=100,
         # Disable rendering for batch evaluation
@@ -576,8 +588,8 @@ def main():
         # Algorithm
         enable_shielded_rollout_collision=False,
         enable_shielded_rollout_hitch=False,
-        enable_projection=False,
-        enable_guidance=True,
+        enable_projection=True,
+        enable_guidance=False,
         terminal_reward_weight=5.78395,
         terminal_reward_threshold=10.0,
         temp_sample=0.0001,

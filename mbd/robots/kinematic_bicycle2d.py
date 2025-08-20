@@ -535,6 +535,183 @@ class KinematicBicycle2d(TractorTrailer2d):
         
         # No trailer or hitch lines to update
 
+    def _numpy_projection_function(self, args_tuple):
+        """
+        Pure NumPy projection function for host callback (bicycle model).
+        Minimizes ||u - u_original||² subject to safety constraints on resulting state.
+        Uses tractor-only geometry (no trailer, no hitch constraint).
+        """
+        import numpy as np
+        from scipy.optimize import minimize
+        
+        # Unpack arguments
+        q_current_np, u_original_normalized_np = args_tuple
+        
+        # Store environment parameters for use in nested functions
+        l1, lf1, lr = self.l1, self.lf1, self.lr
+        tractor_width = self.tractor_width
+        v_max, delta_max = self.v_max, self.delta_max
+        dt = self.dt
+        obs_circles = self.obs_circles
+        obs_rectangles = self.obs_rectangles
+        
+        def bicycle_dynamics_np(x, u_scaled):
+            """NumPy version of bicycle dynamics"""
+            px, py, theta1 = x
+            v, delta = u_scaled
+            px_dot = v * np.cos(theta1)
+            py_dot = v * np.sin(theta1)
+            theta1_dot = (v / l1) * np.tan(delta)
+            return np.array([px_dot, py_dot, theta1_dot])
+        
+        def rk4_np(dynamics, x, u, dt):
+            """NumPy version of RK4 integration"""
+            k1 = dynamics(x, u)
+            k2 = dynamics(x + dt / 2 * k1, u)
+            k3 = dynamics(x + dt / 2 * k2, u)
+            k4 = dynamics(x + dt * k3, u)
+            return x + dt / 6 * (k1 + 2 * k2 + 2 * k3 + k4)
+        
+        def input_scaler_np(u_normalized):
+            """NumPy version of input scaler"""
+            v = u_normalized[0] * v_max
+            delta = u_normalized[1] * delta_max
+            return np.array([v, delta])
+        
+        def get_tractor_rectangle_np(x):
+            """Get tractor oriented box params: center, half_sizes, angle"""
+            px, py, theta1 = x[:3]
+            tractor_center_x = px + 0.5 * (l1 + lf1 - lr) * np.cos(theta1)
+            tractor_center_y = py + 0.5 * (l1 + lf1 - lr) * np.sin(theta1)
+            half_len = (l1 + lf1 + lr) / 2.0
+            half_wid = tractor_width / 2.0
+            center = np.array([tractor_center_x, tractor_center_y])
+            half_sizes = np.array([half_len, half_wid])
+            angle = theta1
+            return center, half_sizes, angle
+        
+        def _sdf_oriented_box_np(point, center, half_size, angle):
+            """
+            Signed distance from point to oriented rectangle.
+            Positive outside, negative inside.
+            """
+            # box axes
+            u = np.array([np.cos(angle), np.sin(angle)])
+            v = np.array([-np.sin(angle), np.cos(angle)])
+            
+            # vector from box center to query point
+            d = np.array([np.dot(point - center, u), np.dot(point - center, v)])
+            
+            # how far outside along each local axis
+            q = np.abs(d) - half_size
+            
+            # outside term: Euclidean norm of positive parts
+            outside = np.linalg.norm(np.maximum(q, 0.0))
+            
+            # inside term: max of the two inside distances (≤0)
+            inside = min(max(q[0], q[1]), 0.0)
+            
+            return outside + inside
+        
+        def _sdf_two_boxes_np(c1, h1, a1, c2, h2, a2):
+            """Signed distance (gap) between two oriented boxes."""
+            # box axes
+            u1 = np.array([np.cos(a1), np.sin(a1)])
+            v1 = np.array([-np.sin(a1), np.cos(a1)])
+            u2 = np.array([np.cos(a2), np.sin(a2)])
+            v2 = np.array([-np.sin(a2), np.cos(a2)])
+            axes = [u1, v1, u2, v2]
+            
+            def gap_on_axis(axis):
+                # projection centers
+                p1 = np.dot(c1, axis)
+                p2 = np.dot(c2, axis)
+                # projection radii
+                r1 = h1[0] * abs(np.dot(u1, axis)) + h1[1] * abs(np.dot(v1, axis))
+                r2 = h2[0] * abs(np.dot(u2, axis)) + h2[1] * abs(np.dot(v2, axis))
+                # signed gap: positive if disjoint, negative if overlapping
+                return max((p2 - r2) - (p1 + r1), (p1 - r1) - (p2 + r2))
+            
+            # take the worst (largest) gap over all separating axes
+            gaps = [gap_on_axis(a) for a in axes]
+            return max(gaps)
+        
+        def _signed_dist_rect_circle_np(x, circle):
+            """Signed distance between tractor rectangle and circle."""
+            center, half_sizes, angle = get_tractor_rectangle_np(x)
+            center_c, r = circle[:2], circle[2]
+            d = _sdf_oriented_box_np(center_c, center, half_sizes, angle)
+            return d - r
+        
+        def _signed_dist_rect_rect_np(x, rect_obs):
+            """Signed distance between tractor rectangle and rectangular obstacle."""
+            ox, oy, w, h, oa = rect_obs
+            c_obs = np.array([ox, oy])
+            hs_obs = np.array([w/2.0, h/2.0])
+            c_t, hs_t, a_t = get_tractor_rectangle_np(x)
+            return _sdf_two_boxes_np(c_t, hs_t, a_t, c_obs, hs_obs, oa)
+        
+        def constraint_function_np(q):
+            """Constraint evaluation: returns array with elements >= 0 for feasibility."""
+            cs = []
+            
+            # Circular obstacles
+            if len(obs_circles) > 0:
+                for i in range(len(obs_circles)):
+                    circle = obs_circles[i]
+                    d = _signed_dist_rect_circle_np(q, circle)
+                    cs.append(float(d))
+            
+            # Rectangular obstacles
+            if len(obs_rectangles) > 0:
+                for i in range(len(obs_rectangles)):
+                    rect = obs_rectangles[i]
+                    d = _signed_dist_rect_rect_np(q, rect)
+                    cs.append(float(d))
+            
+            return np.array(cs) if len(cs) > 0 else np.array([1.0])
+        
+        def objective(u_normalized):
+            """Objective: minimize distance to original control input"""
+            return np.sum((u_normalized - u_original_normalized_np)**2)
+        
+        def constraint_function(u_normalized):
+            """Constraint: evaluate feasibility at next state from RK4 step."""
+            u_scaled = input_scaler_np(u_normalized)
+            q_new = rk4_np(bicycle_dynamics_np, q_current_np, u_scaled, dt)
+            constraints = constraint_function_np(q_new)
+            return constraints
+        
+        # Optimization setup
+        u0 = u_original_normalized_np
+        bounds = [(-1.0, 1.0), (-1.0, 1.0)]
+        constraints = {
+            'type': 'ineq',
+            'fun': constraint_function
+        }
+        
+        try:
+            # Use trust-constr which handles nonlinear constraints well
+            result = minimize(
+                objective,
+                u0,
+                method='trust-constr',
+                bounds=bounds,
+                constraints=constraints,
+                options={
+                    'maxiter': 50,
+                    'gtol': 1e-4,
+                    'verbose': 0
+                }
+            )
+            
+            if result.success:
+                return result.x
+            else:
+                return u_original_normalized_np
+        except Exception:
+            return u_original_normalized_np
+
     @partial(jax.jit, static_argnums=(0,))
     def _guidance_function(self, x):
         """Guidance function for bicycle model"""
