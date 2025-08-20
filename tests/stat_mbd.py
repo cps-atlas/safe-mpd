@@ -542,6 +542,8 @@ def create_heat_map_visualization(individual_results: List[Dict], env, verbose: 
         return fig
     else:
         # Show the plot as before
+        plt.savefig(f"heat_map.png")
+        plt.savefig(f"heat_map.svg")
         plt.show()
         if verbose:
             print(f"Heat map displayed: {len(successful_positions)} successful, {len(failed_positions)} failed trials")
@@ -557,7 +559,7 @@ def main():
     # Create base configuration for parking scenario
     config = MBDConfig(
         # Core settings
-        env_name="acc_tt2d",
+        env_name="tt2d",
         case="parking", 
         motion_preference=0,  # No motion preference
         enable_demo=False,    # No demonstration
@@ -566,16 +568,16 @@ def main():
         Hsample=50,
         Ndiffuse=100,
         # Disable rendering for batch evaluation
-        render=True,
+        render=False,
         save_animation=False,
-        show_animation=True,
+        show_animation=False,
         save_denoising_animation=False,
         verbose=False,
         # Algorithm
-        enable_shielded_rollout_collision=True,
-        enable_shielded_rollout_hitch=True,
+        enable_shielded_rollout_collision=False,
+        enable_shielded_rollout_hitch=False,
         enable_projection=False,
-        enable_guidance=False,
+        enable_guidance=True,
         terminal_reward_weight=5.78395,
         terminal_reward_threshold=10.0,
         temp_sample=0.0001,
