@@ -100,7 +100,7 @@ class NTrailer2d(TractorTrailer2d):
         return x_dot
 
     def reset(self, rng: jax.Array):
-        return State(self.x0, self.x0, jnp.array(0.0, dtype=self.x0.dtype), jnp.array(0.0, dtype=self.x0.dtype))
+        return State(self.x0, self.x0, jnp.array(0.0, dtype=self.x0.dtype), jnp.array(0.0, dtype=self.x0.dtype), jnp.zeros(2), jnp.array(False))
 
     def set_init_pos(self, x=None, y=None, dx=None, dy=None, theta1=0.0, theta2=0.0):
         # Reuse base logic to set tractor (theta1) and first trailer (theta2)
@@ -125,7 +125,10 @@ class NTrailer2d(TractorTrailer2d):
     @partial(jax.jit, static_argnums=(0, 3))
     def _step_internal(self, state: State, action: jax.Array, visualization_mode: bool) -> State:
         action = jnp.clip(action, -1.0, 1.0)
-        u_scaled = self.input_scaler(action)
+        backup_active_prev = state.in_backup_mode
+        u_backup_norm = jnp.array([0.0, 0.0])
+        action_eff_norm = jnp.where(backup_active_prev, u_backup_norm, action)
+        u_scaled = self.input_scaler(action_eff_norm)
         q = state.pipeline_state
         assert q.shape[0] == 3 + self.num_trailers, "state length mismatch in NTrailer2d._step_internal"
         if self.enable_projection:
@@ -136,6 +139,8 @@ class NTrailer2d(TractorTrailer2d):
             q_final = q_reward if visualization_mode else q_proposed
             obstacle_collision = False
             hitch_violation = False
+            applied_action = action_eff_norm
+            backup_active_next = backup_active_prev
         else:
             q_proposed = rk4(self.n_trailer_dynamics, q, u_scaled, self.dt)
             use_shielded_rollout = self.enable_shielded_rollout_collision | self.enable_shielded_rollout_hitch
@@ -147,6 +152,10 @@ class NTrailer2d(TractorTrailer2d):
                 return self._step_without_shielded_rollout(q_prop)
             q_final, obstacle_collision, hitch_violation = jax.lax.cond(use_shielded_rollout, use_shielded, use_naive, (q_proposed,))
             q_reward = q_final
+            should_fallback = (self.enable_shielded_rollout_collision & obstacle_collision) | \
+                              (self.enable_shielded_rollout_hitch & hitch_violation)
+            backup_active_next = backup_active_prev | should_fallback
+            applied_action = jnp.where(backup_active_next, u_backup_norm, action)
 
         reward = self.get_reward(q_reward)
         reward = jnp.where(obstacle_collision, reward - self.collision_penalty, reward)
@@ -154,7 +163,8 @@ class NTrailer2d(TractorTrailer2d):
         preference_penalty = self.get_preference_penalty(u_scaled)
         has_pref = self.motion_preference != 0
         reward = jnp.where(has_pref, reward - preference_penalty, reward)
-        return state.replace(pipeline_state=q_final, obs=q_final, reward=reward, done=0.0)
+        return state.replace(pipeline_state=q_final, obs=q_final, reward=reward, done=0.0,
+                             applied_action=applied_action, in_backup_mode=backup_active_next)
 
     @partial(jax.jit, static_argnums=(0,))
     def _step_with_shielded_rollout(self, data):

@@ -7,7 +7,7 @@ import numpy as np
 import logging
 from matplotlib.transforms import Affine2D
 
-from .tt2d import TractorTrailer2d, State
+from .tt2d import TractorTrailer2d, State, rk4
 
 """
 Created on August 4th, 2025
@@ -77,7 +77,7 @@ class KinematicBicycle2d(TractorTrailer2d):
     @partial(jax.jit, static_argnums=(0,))
     def reset(self, rng: jax.Array):
         """Resets the environment to an initial state (3D)."""
-        return State(self.x0, self.x0, 0.0, 0.0)
+        return State(self.x0, self.x0, 0.0, 0.0, jnp.zeros(2), jnp.array(False))
     
     @partial(jax.jit, static_argnums=(0,))
     def bicycle_dynamics(self, x, u):
@@ -199,6 +199,63 @@ class KinematicBicycle2d(TractorTrailer2d):
     def check_collision(self, x, obs_circles, obs_rectangles):
         """Check collision with only tractor geometry (no hitch violations)"""
         return self.check_obstacle_collision(x, obs_circles, obs_rectangles)
+    
+    @partial(jax.jit, static_argnums=(0, 3))
+    def _step_internal(self, state: State, action: jax.Array, visualization_mode: bool) -> State:
+        action = jnp.clip(action, -1.0, 1.0)
+        # Persist backup mode across steps; once entered, stay in backup
+        backup_active_prev = state.in_backup_mode
+        u_backup_norm = jnp.array([0.0, 0.0])
+        action_eff_norm = jnp.where(backup_active_prev, u_backup_norm, action)
+        u_scaled = self.input_scaler(action_eff_norm)
+        q = state.pipeline_state
+        if self.enable_projection:
+            u_safe_normalized = self.project_control_to_safe_set(q, action)
+            u_safe_scaled = self.input_scaler(u_safe_normalized)
+            q_final = rk4(self.tractor_trailer_dynamics, q, u_safe_scaled, self.dt)
+            q_reward = q_final
+            obstacle_collision = False
+            hitch_violation = False
+            applied_action = u_safe_normalized
+            backup_active_next = backup_active_prev
+        elif self.enable_guidance:
+            q_proposed = rk4(self.tractor_trailer_dynamics, q, u_scaled, self.dt)
+            q_reward = self.apply_guidance(q_proposed)
+            q_final = q_reward if visualization_mode else q_proposed
+            obstacle_collision = False
+            hitch_violation = False
+            applied_action = action_eff_norm
+            backup_active_next = backup_active_prev
+        else:
+            q_proposed = rk4(self.tractor_trailer_dynamics, q, u_scaled, self.dt)
+            def use_shielded_rollout_fn(args):
+                q_prop, = args
+                return self._step_with_shielded_rollout((q, q_prop))
+            def use_naive_penalty_fn(args):
+                q_prop, = args
+                return self._step_without_shielded_rollout(q_prop)
+            use_shielded_rollout = self.enable_shielded_rollout_collision | self.enable_shielded_rollout_hitch
+            q_final, obstacle_collision, hitch_violation = jax.lax.cond(
+                use_shielded_rollout,
+                use_shielded_rollout_fn,
+                use_naive_penalty_fn,
+                (q_proposed,)
+            )
+            q_reward = q_final
+            should_fallback = (self.enable_shielded_rollout_collision & obstacle_collision) | \
+                              (self.enable_shielded_rollout_hitch & hitch_violation)
+            backup_active_next = backup_active_prev | should_fallback
+            applied_action = jnp.where(backup_active_next, u_backup_norm, action)
+        reward = self.get_reward(q_reward)
+        reward = jnp.where(obstacle_collision, reward - self.collision_penalty, reward)
+        reward = jnp.where(hitch_violation, reward - self.hitch_penalty, reward)
+        # Use actually applied control for preference penalty
+        u_applied_scaled = self.input_scaler(applied_action)
+        preference_penalty = self.get_preference_penalty(u_applied_scaled)
+        has_preference = self.motion_preference != 0
+        reward = jnp.where(has_preference, reward - preference_penalty, reward)
+        return state.replace(pipeline_state=q_final, obs=q_final, reward=reward, done=0.0,
+                              applied_action=applied_action, in_backup_mode=backup_active_next)
     
     @partial(jax.jit, static_argnums=(0,))
     def get_trailer_back_position(self, x):

@@ -33,6 +33,8 @@ class State:
     obs: jnp.ndarray
     reward: jnp.ndarray
     done: jnp.ndarray
+    applied_action: jnp.ndarray
+    in_backup_mode: jnp.ndarray
 
     
 class TractorTrailer2d:
@@ -254,7 +256,7 @@ class TractorTrailer2d:
     @partial(jax.jit, static_argnums=(0,))
     def reset(self, rng: jax.Array):
         """Resets the environment to an initial state."""
-        return State(self.x0, self.x0, 0.0, 0.0)
+        return State(self.x0, self.x0, 0.0, 0.0, jnp.zeros(2), jnp.array(False))
     
     @partial(jax.jit, static_argnums=(0,))
     def input_scaler(self, u_normalized):
@@ -293,9 +295,13 @@ class TractorTrailer2d:
     def _step_internal(self, state: State, action: jax.Array, visualization_mode: bool) -> State:
         """Internal step function with explicit visualization_mode parameter."""
         action = jnp.clip(action, -1.0, 1.0)
+        # Persist backup mode across steps; once entered, stay in backup for remainder
+        backup_active_prev = state.in_backup_mode
+        u_backup_norm = jnp.array([0.0, 0.0])  # zero velocity and steering as backup for kinematic models
+        action_eff_norm = jnp.where(backup_active_prev, u_backup_norm, action)
         
         # Scale inputs from normalized [-1, 1] to actual ranges
-        u_scaled = self.input_scaler(action)
+        u_scaled = self.input_scaler(action_eff_norm)
         
         q = state.pipeline_state
         
@@ -308,6 +314,8 @@ class TractorTrailer2d:
             q_reward = q_final  # For projection, q_reward = q_final
             obstacle_collision = False  # Guaranteed safe by projection
             hitch_violation = False     # Guaranteed safe by projection
+            applied_action = u_safe_normalized
+            backup_active_next = backup_active_prev
         elif self.enable_guidance:
             # Use guidance: compute proposed state, apply guidance for reward computation
             q_proposed = rk4(self.tractor_trailer_dynamics, q, u_scaled, self.dt)
@@ -320,6 +328,8 @@ class TractorTrailer2d:
             # Collision flags are handled by guidance, not through naive penalty
             obstacle_collision = False  # constraints are handled by guidance, not through naive penalty
             hitch_violation = False     # constraints are handled by guidance, not through naive penalty
+            applied_action = action_eff_norm
+            backup_active_next = backup_active_prev
         else:
             # Use original conditional logic for non-projection/non-guidance methods
             q_proposed = rk4(self.tractor_trailer_dynamics, q, u_scaled, self.dt)
@@ -342,6 +352,12 @@ class TractorTrailer2d:
                 (q_proposed,)
             )
             q_reward = q_final  # For other methods, q_reward = q_final
+
+            # Determine if fallback should start at this step
+            should_fallback = (self.enable_shielded_rollout_collision & obstacle_collision) | \
+                              (self.enable_shielded_rollout_hitch & hitch_violation)
+            backup_active_next = backup_active_prev | should_fallback
+            applied_action = jnp.where(backup_active_next, u_backup_norm, action)
         
         # Compute reward on q_reward (the state we want to evaluate)
         reward = self.get_reward(q_reward)
@@ -350,13 +366,15 @@ class TractorTrailer2d:
         reward = jnp.where(obstacle_collision, reward - self.collision_penalty, reward)
         reward = jnp.where(hitch_violation, reward - self.hitch_penalty, reward)
         
-        # Add preference penalty based on motion direction
-        preference_penalty = self.get_preference_penalty(u_scaled)
+        # Add preference penalty based on motion direction (use actually applied control)
+        u_applied_scaled = self.input_scaler(applied_action)
+        preference_penalty = self.get_preference_penalty(u_applied_scaled)
         has_preference = self.motion_preference != 0
         reward = jnp.where(has_preference, reward - preference_penalty, reward)
         
         # Return q_final as the next state (ensures kinematic consistency)
-        return state.replace(pipeline_state=q_final, obs=q_final, reward=reward, done=0.0)
+        return state.replace(pipeline_state=q_final, obs=q_final, reward=reward, done=0.0,
+                              applied_action=applied_action, in_backup_mode=backup_active_next)
 
     @partial(jax.jit, static_argnums=(0,))
     def _step_with_shielded_rollout(self, data):

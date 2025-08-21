@@ -576,7 +576,7 @@ def main():
         motion_preference=0,  # No motion preference
         enable_demo=False,    # No demonstration
         # Reduce computational cost for testing
-        Nsample=20,
+        Nsample=20000,
         Hsample=50,
         Ndiffuse=100,
         # Disable rendering for batch evaluation

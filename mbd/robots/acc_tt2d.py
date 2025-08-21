@@ -77,7 +77,7 @@ class AccTractorTrailer2d(TractorTrailer2d):
     @partial(jax.jit, static_argnums=(0,))
     def reset(self, rng: jax.Array):
         """Resets the environment to an initial state."""
-        return State(self.x0, self.x0, 0.0, 0.0)
+        return State(self.x0, self.x0, 0.0, 0.0, jnp.zeros(2), jnp.array(False))
 
     @partial(jax.jit, static_argnums=(0,))
     def input_scaler(self, u_normalized):
@@ -124,9 +124,16 @@ class AccTractorTrailer2d(TractorTrailer2d):
     def _step_internal(self, state: State, action: jax.Array, visualization_mode: bool) -> State:
         """Internal step function with explicit visualization_mode parameter."""
         action = jnp.clip(action, -1.0, 1.0)
+        # Persist backup mode across steps; once entered, remain in backup
+        backup_active_prev = state.in_backup_mode
+        # Backup (full braking, zero steering rate). Use sign to decelerate towards zero velocity
+        v_curr = state.pipeline_state[4]
+        decel_sign_now = jnp.where(v_curr > 0, -1.0, jnp.where(v_curr < 0, 1.0, 0.0))
+        u_backup_norm = jnp.array([decel_sign_now, 0.0])  # normalized: [-1, 0] or [1,0] depending on sign
+        action_eff_norm = jnp.where(backup_active_prev, u_backup_norm, action)
         
         # Scale inputs from normalized [-1, 1] to actual ranges
-        u_scaled = self.input_scaler(action)
+        u_scaled = self.input_scaler(action_eff_norm)
         
         q = state.pipeline_state
         
@@ -139,6 +146,8 @@ class AccTractorTrailer2d(TractorTrailer2d):
             q_reward = q_final  # For projection, q_reward = q_final
             obstacle_collision = False  # Guaranteed safe by projection
             hitch_violation = False     # Guaranteed safe by projection
+            applied_action = u_safe_normalized
+            backup_active_next = backup_active_prev
         elif self.enable_guidance:
             # Use guidance: compute proposed state, apply guidance for reward computation
             q_proposed = rk4(self.tractor_trailer_dynamics, q, u_scaled, self.dt)
@@ -151,6 +160,8 @@ class AccTractorTrailer2d(TractorTrailer2d):
             # Collision flags are handled by guidance, not through naive penalty
             obstacle_collision = False  # constraints are handled by guidance, not through naive penalty
             hitch_violation = False     # constraints are handled by guidance, not through naive penalty
+            applied_action = action_eff_norm
+            backup_active_next = backup_active_prev
         else:
             # Use original conditional logic for non-projection/non-guidance methods
             q_proposed = rk4(self.tractor_trailer_dynamics, q, u_scaled, self.dt)
@@ -173,6 +184,12 @@ class AccTractorTrailer2d(TractorTrailer2d):
                 (q_proposed,)
             )
             q_reward = q_final  # For other methods, q_reward = q_final
+
+            # Determine if fallback should start at this step
+            should_fallback = (self.enable_shielded_rollout_collision & obstacle_collision) | \
+                              (self.enable_shielded_rollout_hitch & hitch_violation)
+            backup_active_next = backup_active_prev | should_fallback
+            applied_action = jnp.where(backup_active_next, u_backup_norm, action)
         
         # Compute reward on q_reward (the state we want to evaluate)
         reward = self.get_reward(q_reward[:4])  # Use first 4 elements for kinematic reward
@@ -181,13 +198,15 @@ class AccTractorTrailer2d(TractorTrailer2d):
         reward = jnp.where(obstacle_collision, reward - self.collision_penalty, reward)
         reward = jnp.where(hitch_violation, reward - self.hitch_penalty, reward)
         
-        # Add preference penalty based on motion direction (use final state and control)
-        preference_penalty = self.get_preference_penalty(q_final, u_scaled)
+        # Add preference penalty based on motion direction (use final state and actually applied control)
+        u_applied_scaled = self.input_scaler(applied_action)
+        preference_penalty = self.get_preference_penalty(q_final, u_applied_scaled)
         has_preference = self.motion_preference != 0
         reward = jnp.where(has_preference, reward - preference_penalty, reward)
         
         # Return q_final as the next state (ensures kinematic consistency)
-        return state.replace(pipeline_state=q_final, obs=q_final, reward=reward, done=0.0)
+        return state.replace(pipeline_state=q_final, obs=q_final, reward=reward, done=0.0,
+                              applied_action=applied_action, in_backup_mode=backup_active_next)
 
     @partial(jax.jit, static_argnums=(0,))
     def _step_with_shielded_rollout(self, data):
@@ -213,7 +232,7 @@ class AccTractorTrailer2d(TractorTrailer2d):
         1. Use pre-computed q_proposed as the desired next state
         2. If velocity is high, do additional rollout until stop → q_candidate_final (for safety checking only)
         3. Check safety during the entire rollout (from q_proposed to q_candidate_final)
-        4. If safe → return q_proposed; if unsafe → return q (stick to previous state)
+        4. If safe → return q_proposed; if unsafe → return q_shielded (apply backup control for this step)
         """
         # Step 1: Use pre-computed proposed state (already computed via RK4 in step function)
         q_new = q_proposed
@@ -231,10 +250,15 @@ class AccTractorTrailer2d(TractorTrailer2d):
             (q_new, v_new)
         )
         
-        # Step 4: Return q_new if safe, otherwise stick to previous q
-        # Apply projections based on settings
-        q_shielded = jnp.where(self.enable_shielded_rollout_collision & obstacle_collision, q, q_new)
-        q_final = jnp.where(self.enable_shielded_rollout_hitch & hitch_violation, q, q_shielded)
+        # Step 4: Return q_new if safe, otherwise apply backup control for this step
+        # Backup control aims to decelerate towards zero velocity and zero steering rate
+        decel_sign = jnp.where(v_new > 0, -1.0, jnp.where(v_new < 0, 1.0, 0.0))
+        u_backup_scaled = jnp.array([decel_sign * self.a_max, 0.0])
+        q_backup = rk4(self.tractor_trailer_dynamics, q, u_backup_scaled, self.dt)
+        # If any violation and the corresponding shield flag is enabled, use backup-stepped state
+        use_backup = (self.enable_shielded_rollout_collision & obstacle_collision) | \
+                     (self.enable_shielded_rollout_hitch & hitch_violation)
+        q_final = jnp.where(use_backup, q_backup, q_new)
         
         return q_final, obstacle_collision, hitch_violation
 

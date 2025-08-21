@@ -52,7 +52,7 @@ class MBDConfig:
     # exp
     seed: int = 42
     # env
-    env_name: str = "acc_tt2d"  # "tt2d" for kinematic, "acc_tt2d" for acceleration
+    env_name: str = "tt2d"  # "tt2d" for kinematic, "acc_tt2d" for acceleration
     case: str = "parking" # "parking" for parking scenario, "navigation" for navigation scenario
     verbose: bool = False
     # diffusion
@@ -108,7 +108,7 @@ class MBDConfig:
     ref_theta2_weight: float = 0.1 # theta2 weight in demo evaluation
     # animation
     render: bool = True
-    save_animation: bool = True # flag to enable animation saving
+    save_animation: bool = False # flag to enable animation saving
     show_animation: bool = True  # flag to show animation during creation
     save_denoising_animation: bool = False # flag to enable denoising process visualization
     frame_skip: int = 1  # skip every other frame for denoising animation
@@ -283,11 +283,11 @@ def run_diffusion(args=None, env=None):
         logging.debug("  Warming up rollout_us_jit...")
         dummy_Y0 = jnp.zeros([args.Hsample, Nu])  # Correct shape for action sequence
         #print(f"    dummy_Y0 shape: {dummy_Y0.shape}")
-        _, _ = rollout_us_jit(state_init, dummy_Y0)
+        _, _, _ = rollout_us_jit(state_init, dummy_Y0)
         
         # Warm up rollout_us_with_terminal_jit
         logging.debug("  Warming up rollout_us_with_terminal_jit...")
-        _, _ = rollout_us_with_terminal_jit(state_init, dummy_Y0)
+        _, _, _ = rollout_us_with_terminal_jit(state_init, dummy_Y0)
     else:
         logging.debug("Skipping warmup - using cached JIT functions")
         warmup_start_time = time.time()
@@ -392,11 +392,14 @@ def run_diffusion(args=None, env=None):
             Y0s = Y0s.at[:, :, 0].set(velocity_final)
 
             # esitimate mu_0tm1
-            rewss, qs = jax.vmap(rollout_us_with_terminal_jit, in_axes=(None, 0))(state_init, Y0s)
+            rewss, qs, us_applied_seq = jax.vmap(rollout_us_with_terminal_jit, in_axes=(None, 0))(state_init, Y0s)
             rews = rewss  # rollout_us_with_terminal now returns total reward directly (mean + terminal)
+            # Replace sampled controls with actually applied (shielded) controls
+            #Y0s_effective = us_applied_seq
+            Y0s_effective = Y0s
             
             # Compute steering cost and blend with geometric rewards
-            r_steer = compute_steering_reward(Y0s)  # Shape: (Nsample,)
+            r_steer = compute_steering_reward(Y0s_effective)  # Shape: (Nsample,)
             rews_combined = rews + env.steering_weight * r_steer  # Blend steering reward
             
             rew_std = rews_combined.std() # NOTE: scalar
@@ -416,7 +419,7 @@ def run_diffusion(args=None, env=None):
                 #logp0 = (logp0 - logp0.mean()) / logp0.std() / temp_sample # FIXME: I commented it out since I don't know why this is necessary.
 
             weights = jax.nn.softmax(logp0)
-            Ybar = jnp.einsum("n,nij->ij", weights, Y0s)  # NOTE: update only with reward
+            Ybar = jnp.einsum("n,nij->ij", weights, Y0s_effective)  # NOTE: update only with reward
 
             score = 1 / (1.0 - alphas_bar[i]) * (-Yi + jnp.sqrt(alphas_bar[i]) * Ybar)
             Yim1 = 1 / jnp.sqrt(alphas[i]) * (Yi + (1.0 - alphas_bar[i]) * score)
@@ -506,6 +509,10 @@ def run_diffusion(args=None, env=None):
 
     rng_exp, rng = jax.random.split(rng)
     Ybars, Y0 = reverse(YN, rng_exp, state_init) # NOTE: YN: all zeros, one trajectory of actions 
+    
+    # Replace final Y0 with actually applied (shielded) control sequence
+    _, _, Y0_applied = rollout_us_with_terminal_jit(state_init, Y0)
+    Y0 = Y0_applied
     
     pure_diffusion_time = time.time() - pure_diffusion_start_time
     logging.debug(f"Diffusion computation completed in {pure_diffusion_time:.3f}s")
@@ -724,7 +731,7 @@ def run_diffusion(args=None, env=None):
             create_denoising_animation(env, Ybars, args, step_env_jit, state_init, frame_skip=args.frame_skip)
 
     # Optional final reward computation (for display only, not included in timing)
-    rew_final, _ = rollout_us_with_terminal_jit(state_init, Y0)  # Use Y0
+    rew_final, _, _ = rollout_us_with_terminal_jit(state_init, Y0)  # Use Y0
     # rew_final is already the total reward (mean + terminal), no need to call .mean()
     
     # Print detailed timing report

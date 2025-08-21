@@ -25,29 +25,29 @@ def eval_us(step_env, state, us):
 def rollout_us(step_env, state, us):
     def step(state, u):
         state = step_env(state, u)
-        return state, (state.reward, state.pipeline_state)
+        return state, (state.reward, state.pipeline_state, state.applied_action)
     # Warm-initialize carry to match shape if necessary by a no-op step
     zero_u = jnp.zeros_like(us[0]) if us.shape[0] > 0 else jnp.zeros((2,))
     state_init = step_env(state, zero_u)
-    final_state, (rew_seq, pipeline_state_seq) = jax.lax.scan(step, state_init, us) # NOTE: returns stack of (rew, pipeline_state). _ is the final carry, which is final state in this case
-    return rew_seq, pipeline_state_seq
+    final_state, (rew_seq, pipeline_state_seq, applied_action_seq) = jax.lax.scan(step, state_init, us) # NOTE: returns stack of (rew, pipeline_state, applied_action). _ is the final carry, which is final state in this case
+    return rew_seq, pipeline_state_seq, applied_action_seq
 
 def rollout_us_with_terminal(step_env, env, state, us):
     """Rollout with terminal reward computed separately from stage rewards"""
     def step(state, u):
         state = step_env(state, u)
-        return state, (state.reward, state.pipeline_state)
+        return state, (state.reward, state.pipeline_state, state.applied_action)
     zero_u = jnp.zeros_like(us[0]) if us.shape[0] > 0 else jnp.zeros((2,))
     state_init = step_env(state, zero_u)
-    final_state, (rew_seq, pipeline_state_seq) = jax.lax.scan(step, state_init, us)
+    final_state, (rew_seq, pipeline_state_seq, applied_action_seq) = jax.lax.scan(step, state_init, us)
     
     # Compute mean of stage rewards first, then add separate terminal reward
     stage_reward_mean = rew_seq.mean()
     terminal_reward = env.get_terminal_reward(final_state.pipeline_state)
     total_reward = stage_reward_mean + env.terminal_reward_weight * terminal_reward
     
-    # Return total reward instead of per-timestep rewards for consistency with new logic
-    return total_reward, pipeline_state_seq
+    # Return total reward plus sequences for states and applied controls
+    return total_reward, pipeline_state_seq, applied_action_seq
 
 # def render_us(step_env, sys, state, us):
 #     rollout = []
