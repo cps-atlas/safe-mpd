@@ -52,7 +52,7 @@ class MBDConfig:
     # exp
     seed: int = 42
     # env
-    env_name: str = "tt2d"  # "tt2d" for kinematic, "acc_tt2d" for acceleration
+    env_name: str = "acc_tt2d"  # "tt2d" for kinematic, "acc_tt2d" for acceleration
     case: str = "parking" # "parking" for parking scenario, "navigation" for navigation scenario
     verbose: bool = False
     # diffusion
@@ -539,20 +539,20 @@ def run_diffusion(args=None, env=None):
         def step_with_guided_mode(state, action):
             return env._step_internal(state, action, True)  # visualization_mode=True
         
-        step_env_jit_guided = jax.jit(step_with_guided_mode)
+        step_env_jit_final_rollout = jax.jit(step_with_guided_mode)
         
         # Warm up the guided step function
         dummy_state = state_init
         dummy_action = jnp.zeros(env.action_size)
-        _ = step_env_jit_guided(dummy_state, dummy_action)
+        _ = step_env_jit_final_rollout(dummy_state, dummy_action)
         
         logging.debug("Guided step function with explicit visualization_mode compiled")
     else:
-        step_env_jit_guided = step_env_jit  # Use original if no visualization_mode
+        step_env_jit_final_rollout = step_env_jit  # Use original if no visualization_mode
     
     state = state_init
     
-    print(state.pipeline_state)
+    #print(state.pipeline_state)
     
     # Process trajectory states using pre-allocated arrays and guided step function
     for t in range(Y0.shape[0]):
@@ -560,7 +560,7 @@ def run_diffusion(args=None, env=None):
         # Create a fresh array to avoid JAX type inconsistencies from array slicing
         action = jnp.array(action_raw)
         
-        state = step_env_jit_guided(state, action)  # Use guided step function
+        state = step_env_jit_final_rollout(state, action) 
         # Use index assignment instead of concatenation to avoid recompilation
         xs = xs.at[t + 1].set(state.pipeline_state)
     

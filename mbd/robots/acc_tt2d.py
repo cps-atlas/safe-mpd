@@ -188,7 +188,7 @@ class AccTractorTrailer2d(TractorTrailer2d):
             # Determine if fallback should start at this step
             should_fallback = (self.enable_shielded_rollout_collision & obstacle_collision) | \
                               (self.enable_shielded_rollout_hitch & hitch_violation)
-            backup_active_next = backup_active_prev | should_fallback
+            backup_active_next = backup_active_prev | should_fallback 
             applied_action = jnp.where(backup_active_next, u_backup_norm, action)
         
         # Compute reward on q_reward (the state we want to evaluate)
@@ -205,8 +205,9 @@ class AccTractorTrailer2d(TractorTrailer2d):
         reward = jnp.where(has_preference, reward - preference_penalty, reward)
         
         # Return q_final as the next state (ensures kinematic consistency)
+        # NOTE: since apply fallback for all time steps drop the sample efficiency too much, we allow shielded 
         return state.replace(pipeline_state=q_final, obs=q_final, reward=reward, done=0.0,
-                              applied_action=applied_action, in_backup_mode=backup_active_next)
+                              applied_action=applied_action, in_backup_mode=backup_active_prev)
 
     @partial(jax.jit, static_argnums=(0,))
     def _step_with_shielded_rollout(self, data):

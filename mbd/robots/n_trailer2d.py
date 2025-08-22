@@ -163,8 +163,9 @@ class NTrailer2d(TractorTrailer2d):
         preference_penalty = self.get_preference_penalty(u_scaled)
         has_pref = self.motion_preference != 0
         reward = jnp.where(has_pref, reward - preference_penalty, reward)
+        # NOTE: since apply fallback for all time steps drop the sample efficiency too much, we allow shielded 
         return state.replace(pipeline_state=q_final, obs=q_final, reward=reward, done=0.0,
-                             applied_action=applied_action, in_backup_mode=backup_active_next)
+                             applied_action=applied_action, in_backup_mode=backup_active_prev)
 
     @partial(jax.jit, static_argnums=(0,))
     def _step_with_shielded_rollout(self, data):
