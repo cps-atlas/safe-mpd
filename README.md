@@ -3,12 +3,11 @@ The focus of this project is on the control and planning of tractor-trailer syst
 
 During Summer 2025, I will lead a project addressing the first challenge: developing fast and kinodynamically feasible path planning methods that enable existing sampling-based controllers to effectively track planned trajectories. The primary objective is to develop a path planner that has a significantly better computational efficiency compared to the current internal implementation for the trailer systems, which is hybrid A* planner. This project will also explore the theoretical connections between generative model-based method (ex. model-based diffusion and flow matching) and set invariance theory (including control barrier functions). Furthermore and more importantly, we aim to implement these algorithms using the JAX library in Python to achieve real-time, sub-second execution on on-board computing hardware.
 
-# Getting Started
 ## Installation
 Note, jax is sensitive to CUDA version. In summer 2025, I tested everything with jax==0.6.1 and CUDA 12.8 with docker. 
 In the future, this docker build might not work with latest jax version.
 
-1. After Installing docker (somehow, just follow the website), check the nvidia container has been setup properly. If below cmd success, then you good.
+1. Install the docker and nvidia container toolkit (cuda), and check whether the installation is complete using the below command.
 
 ```bash
 docker run --rm --gpus all nvidia/cuda:12.0.0-base-ubuntu20.04 nvidia-smi
@@ -32,73 +31,126 @@ docker exec -it jax_dev bash
 python $your_code$.py
 ```
 
-4. (optional, updated on 250801) Only when you run tests/tune_mbd.py, run this line inside the docer. Since optuna's GP sampler requires torch (which deafult to require numpy==1.x), and jax[cuda12] requires numpy>=2, this is the lazy solution I found to fix the version issue. If you run `uv add` separately, then the version breaks. 
+4. (Optional, only when you run `python tests/tune_mbd.py`) Run this line inside the docer. Since optuna's GP sampler requires torch (which deafult to require numpy==1.x), and jax[cuda12] requires numpy>=2, this is the lazy solution I found to fix the version issue. If you run `uv add` separately, then the version breaks. But note, this will result in version incompatible issue between the cuda and jax, slowing down the computation speed. 
 ```bash
 uv add torch==2.3.1 "jax[cuda12]"
 ```
 
-5. (optional, updated on 250802) To go back to faster computation speed, you need to clean the .venv/ and set the uv again without torch.
-```bash
-uv add torch==2.3.1 "jax[cuda12]"
-```
+## Getting Started
 
-## Run examples
-To be updated. But refer to the below readme (from the original repo)
+### First run (quick start)
 
-To run model-based diffusion to optimize a trajectory, run the following command:
-
-(250801) need to be rewritten, but here are the checkpoint notes.
-1. when you run tune_mbd.py, you need to install torch as well. But it does not support cuda perfectly, so it has some computation slow down. In RTX 4090, the average pure diffusion time with jax[cuda12] only was 0.56, for tt2d and with shielded_rollout. This can be reproduced by running stat_mbd.py, but without the torch installed (so just the plain docker container). So, make sure if you have run tune_mbd.py, down the docker contariner and up again so that you use clean docker container (without torch). 
+1) Enter the container/shell (see Installation), then from the repo root:
 
 ```bash
-cd mbd/planners
-python mbd_planner.py --env_name $ENV_NAME
+python mbd/planners/mbd_planner.py
 ```
 
-where `$ENV_NAME` is the name of the environment, you can choose from `hopper`, `halfcheetah`, `walker2d`, `ant`, `humanoidrun`, `humanoidstandup`, `humanoidtrack`, `car2d`, `pushT`.
+This launches the diffusion planner with the default `MBDConfig`, renders a rollout, and saves arrays under `src/safe_mbd/results/{env_name}/`.
 
-To run model-based diffusion combined with demonstrations, run the following command:
+### Supported dynamics and how to select them
+
+| Environment | Description | n_state | n_control |
+|-------------|-------------|---------|-----------|
+| **kinematic_bicycle2d** | simple bicycle model | 3 | 2 |
+| **tt2d** | kinematic tractor–trailer (single trailer) | 4 | 2 |
+| **acc_tt2d** | acceleration-controlled tractor–trailer (`u`: acceleration and steering rate) | 6 | 2 |
+| **n_trailer2d** | kinematic N-trailer (set `num_trailers >= 2`) | 3+n | 2 |
+
+Select via `MBDConfig.env_name` and `MBDConfig.num_trailers`:
+
+```python
+# example
+from mbd.planners.mbd_planner import MBDConfig, run_diffusion
+import mbd
+
+config = MBDConfig(
+    env_name="tt2d",      # "kinematic_bicycle2d", "tt2d", "acc_tt2d", or "n_trailer2d"
+    case="parking",       # "parking" or "navigation"
+    num_trailers=1,        # 0 → bicycle; 1 → single trailer; >=2 → n-trailer
+)
+
+env = mbd.envs.get_env(
+    config.env_name,
+    case=config.case,
+    dt=config.dt,
+    H=config.Hsample,
+    num_trailers=config.num_trailers,
+)
+
+run_diffusion(args=config, env=env)
+```
+
+Notes:
+- For the kinematic bicycle, either set `env_name="kinematic_bicycle2d"` or `env_name="tt2d"` with `num_trailers=0`.
+- For n‑trailer, use `env_name="tt2d"` with `num_trailers >= 2`, or `env_name="n_trailer2d"`.
+
+### Setting start/goal (parking scenario)
+
+With `case="parking"`, set start and goal succinctly:
+
+```python
+import jax.numpy as jnp
+
+# Initial pose using geometric convenience params
+env.set_init_pos(dx=2.0, dy=1.0, theta1=0.0, theta2=0.0)
+
+# Goal pose: update orientation only (position comes from parking target)
+env.set_goal_pos(theta1=-jnp.pi/2, theta2=-jnp.pi/2)
+```
+
+- **dx**: distance from the target parking space center to the tractor front face (x‑direction)
+- **dy**: distance from the parking lot entrance line (y‑direction)
+- **theta1/theta2**: tractor/trailer headings
+
+Parking targets are defined in `mbd/envs/env.py` via `Env.get_default_parking_config()['target_spaces']`. To choose a different space pair:
+
+```python
+from mbd.envs.env import Env
+
+parking = Env(case="parking")
+parking.parking_config['target_spaces'] = [4, 12]  # example pair
+env = mbd.envs.get_env(config.env_name, case="parking", env_config=parking, dt=config.dt, H=config.Hsample)
+```
+
+The custom environment for general navigation can be set easily with `case="navigation"`. For custom maps, add rectangles with `env.set_rectangle_obs([...], coordinate_mode="left-top"|"center", padding=...)`, and set initial and goal position with `env.set_init_pos(x=x, yy=y, theta1=theta1, theta2=theta2)` and `env.set_goal_pos(x=x, yy=y, theta1=theta1, theta2=theta2)`.
+
+### Safety methods and baselines
+
+Toggle safety strategies in `MBDConfig`:
+
+- **Shielded rollout (default)**: using shield algorithm to guarantee safety
+  - `enable_shielded_rollout_collision=True`
+  - `enable_shielded_rollout_hitch=True`
+- **Guidance** (gradient-based correction): `enable_guidance=True`
+- **Projection** (control projection): `enable_projection=True`
+- **Original MBD-style (naive penalty)**: set all three off:
+  - `enable_shielded_rollout_collision=False`
+  - `enable_shielded_rollout_hitch=False`
+  - `enable_guidance=False`, `enable_projection=False`
+
+### Running tests
 
 ```bash
-cd mbd/planners
-python mbd_planner.py --env_name $ENV_NAME --enable_demo
+# Default tests
+python tests/test_planners/run_tests.py
+
+# Single test with visualization
+python tests/test_planners/run_tests.py --single test_parking_basic_forward --visualize
+
+# Acceleration-controlled TT or kinematic TT
+python tests/test_planners/run_tests.py --acc
+python tests/test_planners/run_tests.py --kinematic
 ```
 
-Currently, only the `humanoidtrack`, `car2d` support demonstrations.
+See [tests/test_planners/README.md](`tests/test_planners/README.md`) for details and scenario lists.
 
-To run multiple seeds, run the following command:
+### Utilities: statistics and tuning
 
-```bash
-cd mbd/scripts
-python run_mbd.py --env_name $ENV_NAME
-```
-
-To visualize the diffusion process, run the following command:
-
-```bash
-cd mbd/scripts
-python vis_diffusion.py --env_name $ENV_NAME
-```
-
-Please make sure you have run the planner first to generate the data.
-
-### Other Baselines
-
-To run RL-based baselines, run the following command:
-
-```bash
-cd mbd/rl
-python train_brax.py --env_name $ENV_NAME
-```
-
-To run other zeroth order trajectory optimization baselines, run the following command:
-
-```bash
-cd mbd/planners
-python path_integral.py --env_name $ENV_NAME --mode $MODE
-```
-
-where `$MODE` is the mode of the planner, you can choose from `mppi`, `cem`, `cma-es`.
+- **tests/stat_mbd.py**: batch evaluation over diverse initial conditions; reports success rates, errors, and computation time. Optionally visualize heat maps.
+  - Run: `python tests/stat_mbd.py`
+- **tests/tune_mbd.py**: `Optuna`-based hyperparameter optimization (GP sampler + MedianPruner), optionally logs to W&B; optimizes success rate using the statistical evaluator.
+  - Run: `python tests/tune_mbd.py`
 
 ## Reference
 - Original repository: https://github.com/LeCAR-Lab/model-based-diffusion
