@@ -137,8 +137,8 @@ class NTrailer2d(TractorTrailer2d):
             q_proposed = rk4(self.n_trailer_dynamics, q, u_scaled, self.dt)
             q_reward = self.apply_guidance(q_proposed)
             q_final = q_reward if visualization_mode else q_proposed
-            obstacle_collision = False
-            hitch_violation = False
+            obstacle_collision = self.check_obstacle_collision(q_reward, self.obs_circles, self.obs_rectangles)
+            hitch_violation = self.check_hitch_violation(q_reward)
             applied_action = action_eff_norm
             backup_active_next = backup_active_prev
         else:

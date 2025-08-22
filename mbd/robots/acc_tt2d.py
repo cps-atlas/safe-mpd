@@ -157,9 +157,8 @@ class AccTractorTrailer2d(TractorTrailer2d):
             # During visualization: use q_reward to show actual guided trajectory
             q_final = q_reward if visualization_mode else q_proposed
             
-            # Collision flags are handled by guidance, not through naive penalty
-            obstacle_collision = False  # constraints are handled by guidance, not through naive penalty
-            hitch_violation = False     # constraints are handled by guidance, not through naive penalty
+            obstacle_collision = self.check_obstacle_collision(q_reward[:4], self.obs_circles, self.obs_rectangles)
+            hitch_violation = self.check_hitch_violation(q_reward[:4])
             applied_action = action_eff_norm
             backup_active_next = backup_active_prev
         else:

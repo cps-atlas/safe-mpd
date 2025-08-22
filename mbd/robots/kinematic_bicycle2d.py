@@ -214,8 +214,8 @@ class KinematicBicycle2d(TractorTrailer2d):
             u_safe_scaled = self.input_scaler(u_safe_normalized)
             q_final = rk4(self.tractor_trailer_dynamics, q, u_safe_scaled, self.dt)
             q_reward = q_final
-            obstacle_collision = False
-            hitch_violation = False
+            obstacle_collision = self.check_obstacle_collision(q_reward, self.obs_circles, self.obs_rectangles)
+            hitch_violation = self.check_hitch_violation(q_reward)
             applied_action = u_safe_normalized
             backup_active_next = backup_active_prev
         elif self.enable_guidance:

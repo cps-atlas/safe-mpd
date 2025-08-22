@@ -394,9 +394,8 @@ def run_diffusion(args=None, env=None):
             # esitimate mu_0tm1
             rewss, qs, us_applied_seq = jax.vmap(rollout_us_with_terminal_jit, in_axes=(None, 0))(state_init, Y0s)
             rews = rewss  # rollout_us_with_terminal now returns total reward directly (mean + terminal)
-            # Replace sampled controls with actually applied (shielded) controls
-            #Y0s_effective = us_applied_seq
-            Y0s_effective = Y0s
+            # Replace sampled controls with actually applied (if shield applied) controls
+            Y0s_effective = us_applied_seq
             
             # Compute steering cost and blend with geometric rewards
             r_steer = compute_steering_reward(Y0s_effective)  # Shape: (Nsample,)
