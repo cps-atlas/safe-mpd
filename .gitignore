@@ -11,6 +11,11 @@ mbd.egg-info/
 results/
 wandb/
 
+*.png
+*.svg
+*.mp4
+*.gif
+
 temp.sh
 wandb/
 

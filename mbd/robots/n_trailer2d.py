@@ -208,7 +208,7 @@ class NTrailer2d(TractorTrailer2d):
         return penalty
 
     @partial(jax.jit, static_argnums=(0, 3))
-    def apply_guidance(self, q_proposed, step_size=0.05, max_steps=5):
+    def apply_guidance(self, q_proposed, step_size=0.05, max_steps=3):
         if not self.enable_guidance:
             return q_proposed
         def guidance_step(x, _):

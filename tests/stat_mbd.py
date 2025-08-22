@@ -118,8 +118,8 @@ def get_default_parking_config():
         'space_width': 3.5,     # Width of each parking space
         'space_length': 7.0,    # Length of each parking space
         'parking_y_offset': 4.0, # Distance from start area to parking lot
-        #'occupied_spaces': [1, 2, 3, 5, 6, 7, 9, 10, 11, 13, 14, 15],  # 1-indexed occupied spaces
-        'occupied_spaces': [3, 5, 11, 13],  # 1-indexed occupied spaces
+        'occupied_spaces': [1, 2, 3, 5, 6, 7, 9, 10, 11, 13, 14, 15],  # 1-indexed occupied spaces
+        #'occupied_spaces': [3, 5, 11, 13],  # 1-indexed occupied spaces
         'target_spaces': [4, 12],  # Target spaces: tractor in 3, trailer in 11
         'obstacle_radius': 1.0,   # Radius of obstacles in occupied spaces
     }
@@ -132,11 +132,11 @@ def create_rectangular_obstacles():
     Returns:
         List of rectangular obstacles [x_center, y_center, width, height, rotation]
     """
-    # obs_rectangles = [
-    #     [0.0, -14.0, 30.0, 1.0, 0.0]   # Bottom boundary wall
-    # ]
     obs_rectangles = [
+        [0.0, -14.0, 30.0, 1.0, 0.0]   # Bottom boundary wall
     ]
+    # obs_rectangles = [
+    # ]
     return obs_rectangles
 
 
@@ -571,7 +571,7 @@ def main():
     # Create base configuration for parking scenario
     config = MBDConfig(
         # Core settings
-        env_name="kinematic_bicycle2d",
+        env_name="acc_tt2d",
         case="parking", 
         motion_preference=0,  # No motion preference
         enable_demo=False,    # No demonstration
@@ -586,9 +586,9 @@ def main():
         save_denoising_animation=False,
         verbose=False,
         # Algorithm
-        enable_shielded_rollout_collision=False,
-        enable_shielded_rollout_hitch=False,
-        enable_projection=True,
+        enable_shielded_rollout_collision=True,
+        enable_shielded_rollout_hitch=True,
+        enable_projection=False,
         enable_guidance=False,
         terminal_reward_weight=5.78395,
         terminal_reward_threshold=10.0,

@@ -222,8 +222,8 @@ class KinematicBicycle2d(TractorTrailer2d):
             q_proposed = rk4(self.tractor_trailer_dynamics, q, u_scaled, self.dt)
             q_reward = self.apply_guidance(q_proposed)
             q_final = q_reward if visualization_mode else q_proposed
-            obstacle_collision = False
-            hitch_violation = False
+            obstacle_collision = self.check_obstacle_collision(q_reward, self.obs_circles, self.obs_rectangles)
+            hitch_violation = self.check_hitch_violation(q_reward)
             applied_action = action_eff_norm
             backup_active_next = backup_active_prev
         else:
@@ -800,7 +800,7 @@ class KinematicBicycle2d(TractorTrailer2d):
         return total_cost 
     
     @partial(jax.jit, static_argnums=(0, 3))  # Make max_steps static (position 3)
-    def apply_guidance(self, q_proposed, step_size=0.05, max_steps=5):
+    def apply_guidance(self, q_proposed, step_size=0.05, max_steps=3):
         """
         Apply gradient descent guidance to move the proposed state away from constraint violations.
         

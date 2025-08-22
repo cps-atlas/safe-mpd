@@ -354,7 +354,7 @@ class AccTractorTrailer2d(TractorTrailer2d):
         return u_projected
 
     @partial(jax.jit, static_argnums=(0, 3))  # Make max_steps static
-    def apply_guidance(self, q_proposed, step_size=0.05, max_steps=5):
+    def apply_guidance(self, q_proposed, step_size=0.05, max_steps=3):
         """
         Apply gradient descent guidance for 6D acceleration dynamics.
         Uses parent class method with first 4 elements (position and angles).
