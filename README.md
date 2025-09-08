@@ -1,12 +1,5 @@
-# Introduction 
-The focus of this project is on the control and planning of tractor-trailer systems, which have significant applications ranging from towing trucks to warehouse mobile trailers. These systems present substantial control challenges due to their nonlinear dynamics and, in particular, the inherent instability associated with backward motion. Ensuring safe and effective operation of such systems requires addressing three core challenges: (A) rapidly generating kinodynamically feasible global paths, (B) reliably tracking reference paths while guaranteeing safety under complex dynamic constraints, and (C) preventing jack-knifing behavior.
-
-During Summer 2025, I will lead a project addressing the first challenge: developing fast and kinodynamically feasible path planning methods that enable existing sampling-based controllers to effectively track planned trajectories. The primary objective is to develop a path planner that has a significantly better computational efficiency compared to the current internal implementation for the trailer systems, which is hybrid A* planner. This project will also explore the theoretical connections between generative model-based method (ex. model-based diffusion and flow matching) and set invariance theory (including control barrier functions). Furthermore and more importantly, we aim to implement these algorithms using the JAX library in Python to achieve real-time, sub-second execution on on-board computing hardware.
 
 ## Installation
-Note, jax is sensitive to CUDA version. In summer 2025, I tested everything with jax==0.6.1 and CUDA 12.8 with docker. 
-In the future, this docker build might not work with latest jax version.
-
 1. Install the docker and nvidia container toolkit (cuda), and check whether the installation is complete using the below command.
 
 ```bash
@@ -55,7 +48,6 @@ This launches the diffusion planner with the default `MBDConfig`, renders a roll
 | **kinematic_bicycle2d** | simple bicycle model | 3 | 2 |
 | **tt2d** | kinematic tractor–trailer (single trailer) | 4 | 2 |
 | **acc_tt2d** | acceleration-controlled tractor–trailer (`u`: acceleration and steering rate) | 6 | 2 |
-| **n_trailer2d** | kinematic N-trailer (set `num_trailers >= 2`) | 3+n | 2 |
 
 Select via `MBDConfig.env_name` and `MBDConfig.num_trailers`:
 
@@ -124,7 +116,7 @@ Toggle safety strategies in `MBDConfig`:
   - `enable_shielded_rollout_hitch=True`
 - **Guidance** (gradient-based correction): `enable_guidance=True`
 - **Projection** (control projection): `enable_projection=True`
-- **Original MBD-style (naive penalty)**: set all three off:
+- **Original MBD w/ naive penalty**: set all three off:
   - `enable_shielded_rollout_collision=False`
   - `enable_shielded_rollout_hitch=False`
   - `enable_guidance=False`, `enable_projection=False`
