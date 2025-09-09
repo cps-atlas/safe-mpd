@@ -33,7 +33,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 import mbd
 from mbd.planners.mbd_planner import MBDConfig, run_diffusion, clear_jit_cache
-from mbd.utils import create_animation
+from mbd.utils import create_animation, merge_progress_videos
 from mbd.envs.env import Env
 
 @dataclass
@@ -500,6 +500,9 @@ def run_statistical_evaluation(config: MBDConfig,
     # Generate heat map visualization if requested
     if show_heat_map:
         create_heat_map_visualization(individual_results, env, verbose)
+
+    if save_progress_animation:
+        merge_progress_videos(config.env_name, animation_type="trajectory", prefix="progress_trial_", output_name="progress_merged.mp4")
     
     return results
 
@@ -604,13 +607,17 @@ def create_heat_map_visualization(individual_results: List[Dict], env, verbose: 
 
 def main():
     """Example usage of statistical evaluation"""
+
+    merge_progress_videos(env_name="tt2d", animation_type="trajectory", prefix="progress_trial_", output_name="progress_merged.mp4")
+
+    exit()
     # Setup logging
     logging.basicConfig(level=logging.INFO)
     
     # Create base configuration for parking scenario
     config = MBDConfig(
         # Core settings
-        env_name="acc_tt2d",
+        env_name="tt2d",
         case="parking", 
         motion_preference=0,  # No motion preference
         enable_demo=False,    # No demonstration
@@ -664,7 +671,7 @@ def main():
     # Run statistical evaluation
     results = run_statistical_evaluation(
         config=config,
-        num_trials=100,  # Quick test; set to 100 for full run
+        num_trials=10,  # Quick test; set to 100 for full run
         seed=42,
         verbose=True,
         show_heat_map=True,  # Enable heat map visualization

@@ -123,6 +123,50 @@ def export_video(env_name, animation_type="trajectory", video_name=None):
         print(f"FFmpeg failed with return code: {result}")
 
 
+def merge_progress_videos(env_name, animation_type="trajectory", prefix="progress_trial_", output_name="progress_merged.mp4"):
+    """Merge per-trial videos in name order into a single video without re-encoding.
+
+    Uses ffmpeg concat demuxer with stream copy (-c copy) to preserve resolution/quality.
+    """
+    animation_path = f"{mbd.__path__[0]}/../results/{env_name}/animations/{animation_type}"
+    if not os.path.exists(animation_path):
+        print(f"ERROR: Path does not exist: {animation_path}")
+        return None
+
+    # Collect and sort videos by numeric index (zero-padded names still sort correctly)
+    video_files = sorted(glob.glob(f"{animation_path}/{prefix}*.mp4"))
+    if len(video_files) == 0:
+        print("ERROR: No progress videos found to merge.")
+        return None
+
+    # Write concat list file
+    list_path = os.path.join(animation_path, "video_list.txt")
+    with open(list_path, 'w') as f:
+        for vf in video_files:
+            f.write(f"file '{vf}'\n")
+
+    # Concatenate without re-encoding to preserve resolution, fps, and quality
+    out_path = os.path.join(animation_path, output_name)
+    cmd = [
+        'ffmpeg', '-y',
+        '-f', 'concat', '-safe', '0',
+        '-i', list_path,
+        '-c', 'copy',
+        out_path
+    ]
+    result = subprocess.call(cmd)
+    if result == 0:
+        print(f"Merged video created: {out_path}")
+        # Optionally remove the list file
+        try:
+            os.remove(list_path)
+        except Exception:
+            pass
+        return out_path
+    else:
+        print(f"FFmpeg merge failed with return code: {result}")
+        return None
+
 def create_animation(env, trajectory_states, trajectory_actions, args, guided_trajectory_overlay=None, progress_success_positions=None, progress_fail_positions=None, video_name=None):
     """Create animation of the tractor-trailer trajectory
     
