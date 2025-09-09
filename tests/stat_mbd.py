@@ -23,7 +23,7 @@ import numpy as np
 import jax.numpy as jnp
 import jax
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Dict, List, Tuple, Optional
 import time
 import matplotlib.pyplot as plt
@@ -33,6 +33,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 import mbd
 from mbd.planners.mbd_planner import MBDConfig, run_diffusion, clear_jit_cache
+from mbd.utils import create_animation
 from mbd.envs.env import Env
 
 @dataclass
@@ -351,7 +352,8 @@ def run_statistical_evaluation(config: MBDConfig,
                               num_trials: int = 20,
                               seed: int = 42,
                               verbose: bool = True,
-                              show_heat_map: bool = False) -> StatisticalResults:
+                              show_heat_map: bool = False,
+                              save_progress_animation: bool = False) -> StatisticalResults:
     """
     Run statistical evaluation with multiple trials and diverse initial conditions.
     
@@ -380,6 +382,10 @@ def run_statistical_evaluation(config: MBDConfig,
     pure_diffusion_times = []
     successful_trials = 0
     
+    # Cumulative progress markers (previous trials only)
+    progress_success_positions = []  # list of (x, y)
+    progress_fail_positions = []     # list of (x, y)
+
     # Run trials
     for i, trial_config in enumerate(trial_configs):
         if verbose:
@@ -389,6 +395,9 @@ def run_statistical_evaluation(config: MBDConfig,
         # Create environment for this trial
         env = create_trial_environment(config, trial_config)
         
+        # Capture initial position for this trial (in world coordinates)
+        initial_x, initial_y = float(env.x0[0]), float(env.x0[1])
+
         # Run diffusion
         rew_final, Y0, trajectory_states, timing_info = run_diffusion(args=config, env=env)
         
@@ -413,6 +422,36 @@ def run_statistical_evaluation(config: MBDConfig,
             print(f"  Result: {status} | Pos Error: {trial_result['position_error']:.3f} | "
                     f"Time: {trial_result['pure_diffusion_time']:.3f}s | "
                     f"Collision: {trial_result['collision']} | Jackknife: {trial_result['jackknife']}")
+
+        # Save per-trial progress animation with cumulative overlays (previous trials only)
+        if save_progress_animation:
+            # Prepare inputs expected by animation utility
+            # Convert arrays to Python lists for iteration compatibility
+            trajectory_states_list = [trajectory_states[i] for i in range(trajectory_states.shape[0])]
+            trajectory_actions = [Y0[t] for t in range(Y0.shape[0])]
+            trajectory_actions.append(None)
+
+            # Use a temporary args with save_animation enabled and same settings otherwise
+            anim_args = replace(config, save_animation=True)
+            video_name = f"progress_trial_{i+1:03d}.mp4"
+
+            # Draw only previous results on current trial's animation
+            create_animation(
+                env,
+                trajectory_states_list,
+                trajectory_actions,
+                anim_args,
+                guided_trajectory_overlay=None,
+                progress_success_positions=progress_success_positions,
+                progress_fail_positions=progress_fail_positions,
+                video_name=video_name,
+            )
+
+        # Update cumulative markers AFTER saving animation so current trial appears next time
+        if trial_result['success']:
+            progress_success_positions.append((initial_x, initial_y))
+        else:
+            progress_fail_positions.append((initial_x, initial_y))
 
     # Compute aggregate statistics
     success_rate = successful_trials / num_trials
@@ -625,10 +664,11 @@ def main():
     # Run statistical evaluation
     results = run_statistical_evaluation(
         config=config,
-        num_trials=100,  # Small number for testing
+        num_trials=100,  # Quick test; set to 100 for full run
         seed=42,
         verbose=True,
-        show_heat_map=True  # Enable heat map visualization
+        show_heat_map=True,  # Enable heat map visualization
+        save_progress_animation=True
     )
     
     print(f"\nFinal Summary:")

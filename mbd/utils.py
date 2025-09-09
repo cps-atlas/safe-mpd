@@ -8,6 +8,7 @@ from matplotlib import pyplot as plt
 from matplotlib.transforms import Affine2D
 from matplotlib.patches import Patch, Rectangle
 from matplotlib.legend_handler import HandlerPatch
+from matplotlib.lines import Line2D
 from tqdm import tqdm
 import mbd
 import jax.numpy as jnp
@@ -122,7 +123,7 @@ def export_video(env_name, animation_type="trajectory", video_name=None):
         print(f"FFmpeg failed with return code: {result}")
 
 
-def create_animation(env, trajectory_states, trajectory_actions, args, guided_trajectory_overlay=None):
+def create_animation(env, trajectory_states, trajectory_actions, args, guided_trajectory_overlay=None, progress_success_positions=None, progress_fail_positions=None, video_name=None):
     """Create animation of the tractor-trailer trajectory
     
     Args:
@@ -246,6 +247,16 @@ def create_animation(env, trajectory_states, trajectory_actions, args, guided_tr
     # Add start and goal markers
     ax.scatter(env.x0[0], env.x0[1], c='blue', s=150, marker='o', edgecolor='black', linewidth=2, label='Start', zorder=5)
     ax.scatter(env.xg[0], env.xg[1], c='red', s=150, marker='*', edgecolor='black', linewidth=2, label='Goal', zorder=5)
+
+    # Overlay cumulative progress markers if provided (from previous trials)
+    if progress_success_positions is not None and len(progress_success_positions) > 0:
+        sx, sy = zip(*progress_success_positions)
+        ax.scatter(sx, sy, c='green', marker='o', s=120, alpha=0.7,
+                   edgecolors='darkgreen', linewidth=2, label='success', zorder=1)
+    if progress_fail_positions is not None and len(progress_fail_positions) > 0:
+        fx, fy = zip(*progress_fail_positions)
+        ax.scatter(fx, fy, c='red', marker='x', s=120, alpha=0.7,
+                   linewidth=3, label='fail', zorder=1)
     
     # Setup animation patches
     env.setup_animation_patches(ax)
@@ -298,9 +309,25 @@ def create_animation(env, trajectory_states, trajectory_actions, args, guided_tr
         handles.append(jackknife_patch)
         labels.append('Jackknifing')
         handler_map[jackknife_patch] = SquareHandler()
-    
-    # Create legend with custom handler for square patches
-    legend = ax.legend(handles, labels, handler_map=handler_map)
+
+    # Only for progress overlay feature, include success/fail legend and use 2 columns
+    overlay_feature_enabled = (progress_success_positions is not None) or (progress_fail_positions is not None)
+    if overlay_feature_enabled:
+        success_proxy = Line2D([0], [0], marker='o', linestyle='None',
+                               markerfacecolor='green', markeredgecolor='darkgreen',
+                               markersize=10)
+        fail_proxy = Line2D([0], [0], marker='x', linestyle='None',
+                            color='red', markeredgewidth=2, markersize=10)
+        if 'success' not in labels:
+            handles.append(success_proxy)
+            labels.append('success')
+        if 'fail' not in labels:
+            handles.append(fail_proxy)
+            labels.append('fail')
+        legend = ax.legend(handles, labels, handler_map=handler_map, ncol=2)
+    else:
+        # Standard legend
+        legend = ax.legend(handles, labels, handler_map=handler_map)
     fig.tight_layout()
     
     # Animation loop
@@ -378,7 +405,11 @@ def create_animation(env, trajectory_states, trajectory_actions, args, guided_tr
         # Save frame if animation saving is enabled
         if args.save_animation:
             frame_filename = f"{animation_path}/frame_{frame_idx:04d}.png"
-            plt.savefig(frame_filename, dpi=100, bbox_inches='tight')
+            if overlay_feature_enabled:
+                # for this feature, make higher resolution (guess you want to make it prettier?)
+                plt.savefig(frame_filename, dpi=300, bbox_inches='tight')
+            else:
+                plt.savefig(frame_filename, dpi=100, bbox_inches='tight')
     
     # Clear any remaining violation markers
     for marker in violation_markers:
@@ -394,7 +425,7 @@ def create_animation(env, trajectory_states, trajectory_actions, args, guided_tr
     
     # Export video if saving animation
     if args.save_animation:
-        export_video(args.env_name, "trajectory")
+        export_video(args.env_name, "trajectory", video_name if video_name is not None else None)
 
 
 def create_denoising_animation(env, Yi, args, step_env_jit, state_init, frame_skip=1):
