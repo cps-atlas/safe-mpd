@@ -608,9 +608,6 @@ def create_heat_map_visualization(individual_results: List[Dict], env, verbose: 
 def main():
     """Example usage of statistical evaluation"""
 
-    merge_progress_videos(env_name="tt2d", animation_type="trajectory", prefix="progress_trial_", output_name="progress_merged.mp4")
-
-    exit()
     # Setup logging
     logging.basicConfig(level=logging.INFO)
     
@@ -636,9 +633,9 @@ def main():
         enable_shielded_rollout_hitch=True,
         enable_projection=False,
         enable_guidance=False,
-        terminal_reward_weight=5.78395,
+        terminal_reward_weight=10.0,
         terminal_reward_threshold=10.0,
-        temp_sample=0.0001,
+        temp_sample=0.0011091,
         steering_weight=0.01,
         reward_threshold=50.0,
         k_switch=0.1,
@@ -671,11 +668,11 @@ def main():
     # Run statistical evaluation
     results = run_statistical_evaluation(
         config=config,
-        num_trials=10,  # Quick test; set to 100 for full run
+        num_trials=100, 
         seed=42,
         verbose=True,
         show_heat_map=True,  # Enable heat map visualization
-        save_progress_animation=True
+        save_progress_animation=False
     )
     
     print(f"\nFinal Summary:")
