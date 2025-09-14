@@ -614,7 +614,7 @@ def main():
     # Create base configuration for parking scenario
     config = MBDConfig(
         # Core settings
-        env_name="tt2d",
+        env_name="acc_tt2d",
         case="parking", 
         motion_preference=0,  # No motion preference
         enable_demo=False,    # No demonstration
@@ -643,27 +643,6 @@ def main():
         d_thr_factor=0.5,
         num_trailers=1
     )
-    
-    # hyperparmeters found for tt2d, 250802
-        # terminal_reward_weight=5.78395,
-        # terminal_reward_threshold=10.0,
-        # temp_sample=0.0001,
-        # steering_weight=0.01,
-        # reward_threshold=50.0,
-        # k_switch=0.1,
-        # hitch_angle_weight=0.01,
-        # d_thr_factor=0.5
-        
-    # hyperparmeters found for acc_tt2d, 250804
-        # terminal_reward_weight=10.0,
-        # terminal_reward_threshold=10.0,
-        # temp_sample=0.0001,
-        # steering_weight=0.01,
-        # reward_threshold=10.0,
-        # k_switch=5.0,
-        # hitch_angle_weight=0.01,
-        # d_thr_factor=5.0
-        
     
     # Run statistical evaluation
     results = run_statistical_evaluation(
