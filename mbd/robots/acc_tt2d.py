@@ -4,7 +4,7 @@ from flax import struct
 from functools import partial
 import numpy as np
 
-from .tt2d import TractorTrailer2d, State, rk4
+from .tt2d import TractorTrailer2d, State, euler
 
 """
 Created on July 21st, 2025
@@ -33,9 +33,9 @@ class AccTractorTrailer2d(TractorTrailer2d):
         
         # Pre-compute constants for JIT optimization
         # Use larger time step for predictive rollout to reduce computation
-        self._rollout_dt = 1.0  # seconds - larger dt for rollout prediction only
-        self._v_threshold = 0.5  # velocity threshold for rollout decision
-        self._max_rollout_steps = int(2.0 * (self.v_max-self._v_threshold) / (self.a_max * self._rollout_dt))
+        self._rollout_dt = 1.0  # seconds - larger dt for rollout; it is for prediction only
+        self._v_threshold = 0.01  # velocity threshold for rollout decision
+        self._max_rollout_steps = int(2.0 * (self.v_max-0.0) / (self.a_max * self._rollout_dt))
         
         # Override initial state to include v and delta (initialized to zero)
         if hasattr(self, 'x0'):
@@ -128,8 +128,9 @@ class AccTractorTrailer2d(TractorTrailer2d):
         backup_active_prev = state.in_backup_mode
         # Backup (full braking, zero steering rate). Use sign to decelerate towards zero velocity
         v_curr = state.pipeline_state[4]
-        decel_sign_now = jnp.where(v_curr > 0, -1.0, jnp.where(v_curr < 0, 1.0, 0.0))
-        u_backup_norm = jnp.array([decel_sign_now, 0.0])  # normalized: [-1, 0] or [1,0] depending on sign
+        decel_sign_now = jnp.where(v_curr > self._v_threshold, -1.0, jnp.where(v_curr < -self._v_threshold, 1.0, 0.0))
+        a_backup = jnp.clip(jnp.abs(v_curr/self.dt), 0, self.a_max)
+        u_backup_norm = jnp.array([decel_sign_now * a_backup / self.a_max, 0.0])  # normalized: [-1, 0] or [1,0] depending on sign
         action_eff_norm = jnp.where(backup_active_prev, u_backup_norm, action)
         
         # Scale inputs from normalized [-1, 1] to actual ranges
@@ -142,7 +143,7 @@ class AccTractorTrailer2d(TractorTrailer2d):
             # Use control-based projection: optimize control input, then compute resulting state
             u_safe_normalized = self.project_control_to_safe_set(q, action)  # action is normalized
             u_safe_scaled = self.input_scaler(u_safe_normalized)  # Scale to actual ranges
-            q_final = rk4(self.tractor_trailer_dynamics, q, u_safe_scaled, self.dt)
+            q_final = euler(self.tractor_trailer_dynamics, q, u_safe_scaled, self.dt)
             q_reward = q_final  # For projection, q_reward = q_final
             obstacle_collision = False  # Guaranteed safe by projection
             hitch_violation = False     # Guaranteed safe by projection
@@ -150,7 +151,7 @@ class AccTractorTrailer2d(TractorTrailer2d):
             backup_active_next = backup_active_prev
         elif self.enable_guidance:
             # Use guidance: compute proposed state, apply guidance for reward computation
-            q_proposed = rk4(self.tractor_trailer_dynamics, q, u_scaled, self.dt)
+            q_proposed = euler(self.tractor_trailer_dynamics, q, u_scaled, self.dt)
             q_reward = self.apply_guidance(q_proposed)  # Guided state for reward computation
             
             # During denoising: use q_proposed for kinematic consistency
@@ -163,7 +164,7 @@ class AccTractorTrailer2d(TractorTrailer2d):
             backup_active_next = backup_active_prev
         else:
             # Use original conditional logic for non-projection/non-guidance methods
-            q_proposed = rk4(self.tractor_trailer_dynamics, q, u_scaled, self.dt)
+            q_proposed = euler(self.tractor_trailer_dynamics, q, u_scaled, self.dt)
             
             def use_shielded_rollout_fn(args):
                 q_prop, = args
@@ -234,11 +235,12 @@ class AccTractorTrailer2d(TractorTrailer2d):
         3. Check safety during the entire rollout (from q_proposed to q_candidate_final)
         4. If safe → return q_proposed; if unsafe → return q_shielded (apply backup control for this step)
         """
-        # Step 1: Use pre-computed proposed state (already computed via RK4 in step function)
+        # Step 1: Use pre-computed proposed state (already computed via euler in step function)
         q_new = q_proposed
         
         # Step 2: Check if we need additional rollout for safety checking
         v_new = q_new[4]
+        v_cur = q[4]
         
         # Choose safety checking strategy based on velocity
         # For very low velocities, use simple single-step check
@@ -252,9 +254,10 @@ class AccTractorTrailer2d(TractorTrailer2d):
         
         # Step 4: Return q_new if safe, otherwise apply backup control for this step
         # Backup control aims to decelerate towards zero velocity and zero steering rate
-        decel_sign = jnp.where(v_new > 0, -1.0, jnp.where(v_new < 0, 1.0, 0.0))
-        u_backup_scaled = jnp.array([decel_sign * self.a_max, 0.0])
-        q_backup = rk4(self.tractor_trailer_dynamics, q, u_backup_scaled, self.dt)
+        decel_sign = jnp.where(v_cur > self._v_threshold, -1.0, jnp.where(v_new < -self._v_threshold, 1.0, 0.0))
+        a_backup = jnp.clip(jnp.abs(v_cur/self.dt), 0, self.a_max)
+        u_backup_scaled = jnp.array([decel_sign * a_backup, 0.0])
+        q_backup = euler(self.tractor_trailer_dynamics, q, u_backup_scaled, self.dt)
         # If any violation and the corresponding shield flag is enabled, use backup-stepped state
         use_backup = (self.enable_shielded_rollout_collision & obstacle_collision) | \
                      (self.enable_shielded_rollout_hitch & hitch_violation)
@@ -278,7 +281,7 @@ class AccTractorTrailer2d(TractorTrailer2d):
         
         # Continue rollout if not stopped
         should_continue = jnp.abs(v_curr) > self._v_threshold
-        q_next = jnp.where(should_continue, rk4(self.tractor_trailer_dynamics, q_curr, u_stop, self._rollout_dt), q_curr)
+        q_next = jnp.where(should_continue, euler(self.tractor_trailer_dynamics, q_curr, u_stop, self._rollout_dt), q_curr)
         
         # Check safety at this step
         obs_collision_step = self.check_obstacle_collision(q_next[:4], self.obs_circles, self.obs_rectangles)
@@ -303,8 +306,9 @@ class AccTractorTrailer2d(TractorTrailer2d):
         hitch_violation_new = self.check_hitch_violation(q_new[:4])
         
         # Determine deceleration direction from q_new
-        decel_sign = jnp.where(v_new > 0, -1.0, jnp.where(v_new < 0, 1.0, 0.0))
-        u_stop = jnp.array([decel_sign * self.a_max, 0.0])
+        decel_sign = jnp.where(v_new > self._v_threshold, -1.0, jnp.where(v_new < -self._v_threshold, 1.0, 0.0))
+        a_backup = jnp.clip(jnp.abs(v_new/self.dt), 0, self.a_max)
+        u_stop = jnp.array([decel_sign * a_backup, 0.0])
         
         # Run rollout with pre-computed maximum steps using JIT-optimized rollout step
         init_carry = (q_new, False, obstacle_collision_new, hitch_violation_new, u_stop)

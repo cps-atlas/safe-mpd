@@ -7,7 +7,7 @@ import numpy as np
 import logging
 from matplotlib.transforms import Affine2D
 
-from .tt2d import TractorTrailer2d, State, rk4
+from .tt2d import TractorTrailer2d, State, euler
 
 """
 Created on August 4th, 2025
@@ -212,14 +212,14 @@ class KinematicBicycle2d(TractorTrailer2d):
         if self.enable_projection:
             u_safe_normalized = self.project_control_to_safe_set(q, action)
             u_safe_scaled = self.input_scaler(u_safe_normalized)
-            q_final = rk4(self.tractor_trailer_dynamics, q, u_safe_scaled, self.dt)
+            q_final = euler(self.tractor_trailer_dynamics, q, u_safe_scaled, self.dt)
             q_reward = q_final
             obstacle_collision = self.check_obstacle_collision(q_reward, self.obs_circles, self.obs_rectangles)
             hitch_violation = self.check_hitch_violation(q_reward)
             applied_action = u_safe_normalized
             backup_active_next = backup_active_prev
         elif self.enable_guidance:
-            q_proposed = rk4(self.tractor_trailer_dynamics, q, u_scaled, self.dt)
+            q_proposed = euler(self.tractor_trailer_dynamics, q, u_scaled, self.dt)
             q_reward = self.apply_guidance(q_proposed)
             q_final = q_reward if visualization_mode else q_proposed
             obstacle_collision = self.check_obstacle_collision(q_reward, self.obs_circles, self.obs_rectangles)
@@ -227,7 +227,7 @@ class KinematicBicycle2d(TractorTrailer2d):
             applied_action = action_eff_norm
             backup_active_next = backup_active_prev
         else:
-            q_proposed = rk4(self.tractor_trailer_dynamics, q, u_scaled, self.dt)
+            q_proposed = euler(self.tractor_trailer_dynamics, q, u_scaled, self.dt)
             def use_shielded_rollout_fn(args):
                 q_prop, = args
                 return self._step_with_shielded_rollout((q, q_prop))
@@ -622,8 +622,8 @@ class KinematicBicycle2d(TractorTrailer2d):
             theta1_dot = (v / l1) * np.tan(delta)
             return np.array([px_dot, py_dot, theta1_dot])
         
-        def rk4_np(dynamics, x, u, dt):
-            """NumPy version of RK4 integration"""
+        def euler_np(dynamics, x, u, dt):
+            """NumPy version of euler integration"""
             k1 = dynamics(x, u)
             k2 = dynamics(x + dt / 2 * k1, u)
             k3 = dynamics(x + dt / 2 * k2, u)
@@ -734,9 +734,9 @@ class KinematicBicycle2d(TractorTrailer2d):
             return np.sum((u_normalized - u_original_normalized_np)**2)
         
         def constraint_function(u_normalized):
-            """Constraint: evaluate feasibility at next state from RK4 step."""
+            """Constraint: evaluate feasibility at next state from euler step."""
             u_scaled = input_scaler_np(u_normalized)
-            q_new = rk4_np(bicycle_dynamics_np, q_current_np, u_scaled, dt)
+            q_new = euler_np(bicycle_dynamics_np, q_current_np, u_scaled, dt)
             constraints = constraint_function_np(q_new)
             return constraints
         
