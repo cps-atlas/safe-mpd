@@ -614,7 +614,7 @@ def main():
     # Create base configuration for parking scenario
     config = MBDConfig(
         # Core settings
-        env_name="acc_tt2d",
+        env_name="tt2d",
         case="parking", 
         motion_preference=0,  # No motion preference
         enable_demo=False,    # No demonstration
@@ -633,14 +633,14 @@ def main():
         enable_shielded_rollout_hitch=True,
         enable_projection=False,
         enable_guidance=False,
-        terminal_reward_weight=10.0,
-        terminal_reward_threshold=10.0,
-        temp_sample=0.0011091,
+        terminal_reward_weight=5.0,
+        terminal_reward_threshold=20.0,
+        temp_sample=0.00001,
         steering_weight=0.01,
         reward_threshold=50.0,
-        k_switch=0.1,
+        k_switch=3.0,
         hitch_angle_weight=0.01,
-        d_thr_factor=0.5,
+        d_thr_factor=1.0,
         num_trailers=1
     )
     
