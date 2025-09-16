@@ -26,6 +26,9 @@ def rk4(dynamics, x, u, dt):
     k4 = dynamics(x + dt * k3, u)
     return x + dt / 6 * (k1 + 2 * k2 + 2 * k3 + k4)
 
+def euler(dynamics, x, u, dt):
+    k1 = dynamics(x, u)
+    return x + dt * k1
 
 @struct.dataclass
 class State:
@@ -44,7 +47,7 @@ class TractorTrailer2d:
     Input constraint: v ∈ [-1, 1], delta ∈ [-55°, 55°]
     """
     def __init__(self, x0=None, xg=None, env_config=None, case="parking", dt=0.2, H=50, motion_preference=0, 
-                 collision_penalty=0.15, enable_shielded_rollout_collision=False, hitch_penalty=0.10, 
+                 collision_penalty=0.15, enable_shielded_rollout_collision=True, hitch_penalty=0.10, 
                  enable_shielded_rollout_hitch=True, enable_projection=False, enable_guidance=False, reward_threshold=25.0, ref_reward_threshold=5.0,
                  max_w_theta=0.75, hitch_angle_weight=0.2, l1=3.23, l2=2.9, lh=1.15, lf1=0.9, lr=1.848, lf2=1.42, lr2=3.225, 
                  tractor_width=2.0, trailer_width=2.5, v_max=3.0, delta_max_deg=55.0,
@@ -310,7 +313,7 @@ class TractorTrailer2d:
             # Use control-based projection: optimize control input, then compute resulting state
             u_safe_normalized = self.project_control_to_safe_set(q, action)  # action is normalized
             u_safe_scaled = self.input_scaler(u_safe_normalized)  # Scale to actual ranges
-            q_final = rk4(self.tractor_trailer_dynamics, q, u_safe_scaled, self.dt)
+            q_final = euler(self.tractor_trailer_dynamics, q, u_safe_scaled, self.dt)
             q_reward = q_final  # For projection, q_reward = q_final
             obstacle_collision = False  # Guaranteed safe by projection
             hitch_violation = False     # Guaranteed safe by projection
@@ -318,7 +321,7 @@ class TractorTrailer2d:
             backup_active_next = backup_active_prev
         elif self.enable_guidance:
             # Use guidance: compute proposed state, apply guidance for reward computation
-            q_proposed = rk4(self.tractor_trailer_dynamics, q, u_scaled, self.dt)
+            q_proposed = euler(self.tractor_trailer_dynamics, q, u_scaled, self.dt)
             q_reward = self.apply_guidance(q_proposed)  # Guided state for reward computation
             
             # During denoising: use q_proposed for kinematic consistency
@@ -331,7 +334,7 @@ class TractorTrailer2d:
             backup_active_next = backup_active_prev
         else:
             # Use original conditional logic for non-projection/non-guidance methods
-            q_proposed = rk4(self.tractor_trailer_dynamics, q, u_scaled, self.dt)
+            q_proposed = euler(self.tractor_trailer_dynamics, q, u_scaled, self.dt)
             
             def use_shielded_rollout_fn(args):
                 q_prop, = args
@@ -1473,8 +1476,8 @@ class TractorTrailer2d:
             
             return np.array([px_dot, py_dot, theta1_dot, theta2_dot])
         
-        def rk4_np(dynamics, x, u, dt):
-            """NumPy version of RK4 integration"""
+        def euler_np(dynamics, x, u, dt):
+            """NumPy version of euler integration"""
             k1 = dynamics(x, u)
             k2 = dynamics(x + dt / 2 * k1, u)
             k3 = dynamics(x + dt / 2 * k2, u)
@@ -1634,7 +1637,7 @@ class TractorTrailer2d:
             u_scaled = input_scaler_np(u_normalized)
             
             # Compute resulting state
-            q_new = rk4_np(tractor_trailer_dynamics_np, q_current_np, u_scaled, dt)
+            q_new = euler_np(tractor_trailer_dynamics_np, q_current_np, u_scaled, dt)
             
             # Evaluate constraints on resulting state
             constraints = constraint_function_np(q_new)

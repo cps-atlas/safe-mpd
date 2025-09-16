@@ -23,7 +23,7 @@ import numpy as np
 import jax.numpy as jnp
 import jax
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Dict, List, Tuple, Optional
 import time
 import matplotlib.pyplot as plt
@@ -33,6 +33,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 import mbd
 from mbd.planners.mbd_planner import MBDConfig, run_diffusion, clear_jit_cache
+from mbd.utils import create_animation, merge_progress_videos
 from mbd.envs.env import Env
 
 @dataclass
@@ -351,7 +352,8 @@ def run_statistical_evaluation(config: MBDConfig,
                               num_trials: int = 20,
                               seed: int = 42,
                               verbose: bool = True,
-                              show_heat_map: bool = False) -> StatisticalResults:
+                              show_heat_map: bool = False,
+                              save_progress_animation: bool = False) -> StatisticalResults:
     """
     Run statistical evaluation with multiple trials and diverse initial conditions.
     
@@ -380,6 +382,10 @@ def run_statistical_evaluation(config: MBDConfig,
     pure_diffusion_times = []
     successful_trials = 0
     
+    # Cumulative progress markers (previous trials only)
+    progress_success_positions = []  # list of (x, y)
+    progress_fail_positions = []     # list of (x, y)
+
     # Run trials
     for i, trial_config in enumerate(trial_configs):
         if verbose:
@@ -389,6 +395,9 @@ def run_statistical_evaluation(config: MBDConfig,
         # Create environment for this trial
         env = create_trial_environment(config, trial_config)
         
+        # Capture initial position for this trial (in world coordinates)
+        initial_x, initial_y = float(env.x0[0]), float(env.x0[1])
+
         # Run diffusion
         rew_final, Y0, trajectory_states, timing_info = run_diffusion(args=config, env=env)
         
@@ -413,6 +422,36 @@ def run_statistical_evaluation(config: MBDConfig,
             print(f"  Result: {status} | Pos Error: {trial_result['position_error']:.3f} | "
                     f"Time: {trial_result['pure_diffusion_time']:.3f}s | "
                     f"Collision: {trial_result['collision']} | Jackknife: {trial_result['jackknife']}")
+
+        # Save per-trial progress animation with cumulative overlays (previous trials only)
+        if save_progress_animation:
+            # Prepare inputs expected by animation utility
+            # Convert arrays to Python lists for iteration compatibility
+            trajectory_states_list = [trajectory_states[i] for i in range(trajectory_states.shape[0])]
+            trajectory_actions = [Y0[t] for t in range(Y0.shape[0])]
+            trajectory_actions.append(None)
+
+            # Use a temporary args with save_animation enabled and same settings otherwise
+            anim_args = replace(config, save_animation=True)
+            video_name = f"progress_trial_{i+1:03d}.mp4"
+
+            # Draw only previous results on current trial's animation
+            create_animation(
+                env,
+                trajectory_states_list,
+                trajectory_actions,
+                anim_args,
+                guided_trajectory_overlay=None,
+                progress_success_positions=progress_success_positions,
+                progress_fail_positions=progress_fail_positions,
+                video_name=video_name,
+            )
+
+        # Update cumulative markers AFTER saving animation so current trial appears next time
+        if trial_result['success']:
+            progress_success_positions.append((initial_x, initial_y))
+        else:
+            progress_fail_positions.append((initial_x, initial_y))
 
     # Compute aggregate statistics
     success_rate = successful_trials / num_trials
@@ -461,6 +500,9 @@ def run_statistical_evaluation(config: MBDConfig,
     # Generate heat map visualization if requested
     if show_heat_map:
         create_heat_map_visualization(individual_results, env, verbose)
+
+    if save_progress_animation:
+        merge_progress_videos(config.env_name, animation_type="trajectory", prefix="progress_trial_", output_name="progress_merged.mp4")
     
     return results
 
@@ -565,13 +607,14 @@ def create_heat_map_visualization(individual_results: List[Dict], env, verbose: 
 
 def main():
     """Example usage of statistical evaluation"""
+
     # Setup logging
     logging.basicConfig(level=logging.INFO)
     
     # Create base configuration for parking scenario
     config = MBDConfig(
         # Core settings
-        env_name="acc_tt2d",
+        env_name="tt2d",
         case="parking", 
         motion_preference=0,  # No motion preference
         enable_demo=False,    # No demonstration
@@ -590,45 +633,25 @@ def main():
         enable_shielded_rollout_hitch=True,
         enable_projection=False,
         enable_guidance=False,
-        terminal_reward_weight=5.78395,
-        terminal_reward_threshold=10.0,
-        temp_sample=0.0001,
+        terminal_reward_weight=5.0,
+        terminal_reward_threshold=20.0,
+        temp_sample=0.00001,
         steering_weight=0.01,
         reward_threshold=50.0,
-        k_switch=0.1,
+        k_switch=3.0,
         hitch_angle_weight=0.01,
-        d_thr_factor=0.5,
+        d_thr_factor=1.0,
         num_trailers=1
     )
-    
-    # hyperparmeters found for tt2d, 250802
-        # terminal_reward_weight=5.78395,
-        # terminal_reward_threshold=10.0,
-        # temp_sample=0.0001,
-        # steering_weight=0.01,
-        # reward_threshold=50.0,
-        # k_switch=0.1,
-        # hitch_angle_weight=0.01,
-        # d_thr_factor=0.5
-        
-    # hyperparmeters found for acc_tt2d, 250804
-        # terminal_reward_weight=10.0,
-        # terminal_reward_threshold=10.0,
-        # temp_sample=0.0001,
-        # steering_weight=0.01,
-        # reward_threshold=10.0,
-        # k_switch=5.0,
-        # hitch_angle_weight=0.01,
-        # d_thr_factor=5.0
-        
     
     # Run statistical evaluation
     results = run_statistical_evaluation(
         config=config,
-        num_trials=100,  # Small number for testing
+        num_trials=100, 
         seed=42,
         verbose=True,
-        show_heat_map=True  # Enable heat map visualization
+        show_heat_map=True,  # Enable heat map visualization
+        save_progress_animation=False
     )
     
     print(f"\nFinal Summary:")

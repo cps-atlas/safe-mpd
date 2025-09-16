@@ -6,7 +6,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.transforms import Affine2D
 
-from .tt2d import TractorTrailer2d, State, rk4
+from .tt2d import TractorTrailer2d, State, euler
 
 class NTrailer2d(TractorTrailer2d):
     """
@@ -134,7 +134,7 @@ class NTrailer2d(TractorTrailer2d):
         if self.enable_projection:
             raise AssertionError("Projection not implemented for NTrailer2d")
         elif self.enable_guidance:
-            q_proposed = rk4(self.n_trailer_dynamics, q, u_scaled, self.dt)
+            q_proposed = euler(self.n_trailer_dynamics, q, u_scaled, self.dt)
             q_reward = self.apply_guidance(q_proposed)
             q_final = q_reward if visualization_mode else q_proposed
             obstacle_collision = self.check_obstacle_collision(q_reward, self.obs_circles, self.obs_rectangles)
@@ -142,7 +142,7 @@ class NTrailer2d(TractorTrailer2d):
             applied_action = action_eff_norm
             backup_active_next = backup_active_prev
         else:
-            q_proposed = rk4(self.n_trailer_dynamics, q, u_scaled, self.dt)
+            q_proposed = euler(self.n_trailer_dynamics, q, u_scaled, self.dt)
             use_shielded_rollout = self.enable_shielded_rollout_collision | self.enable_shielded_rollout_hitch
             def use_shielded(args):
                 q_prop, = args

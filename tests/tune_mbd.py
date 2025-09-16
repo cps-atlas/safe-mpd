@@ -152,20 +152,20 @@ class DiffusionOptimizer:
         params = {}
         
         # Diffusion parameters  
-        params['temp_sample'] = trial.suggest_float('temp_sample', 0.0001, 10.0, log=True)
+        #params['temp_sample'] = trial.suggest_float('temp_sample', 0.00001, 0.1, log=True)
         
         # Reward thresholds
-        params['reward_threshold'] = trial.suggest_float('reward_threshold', 10.0, 50.0)
-        params['terminal_reward_threshold'] = trial.suggest_float('terminal_reward_threshold', 0.5, 10.0) 
-        params['terminal_reward_weight'] = trial.suggest_float('terminal_reward_weight', 0.1, 10.0)
+        #params['reward_threshold'] = trial.suggest_float('reward_threshold', 10.0, 50.0, step=1.0)
+        #params['terminal_reward_threshold'] = trial.suggest_float('terminal_reward_threshold', 0.5, 20.0) 
+        #params['terminal_reward_weight'] = trial.suggest_float('terminal_reward_weight', 0.1, 20.0)
         
         # Cost weights
-        params['steering_weight'] = trial.suggest_float('steering_weight', 0.01, 0.2)
+        #params['steering_weight'] = trial.suggest_float('steering_weight', 0.01, 0.2)
         
         # Reward shaping parameters
-        params['d_thr_factor'] = trial.suggest_float('d_thr_factor', 0.5, 5.0)
-        params['k_switch'] = trial.suggest_float('k_switch', 0.1, 5.0)
-        params['hitch_angle_weight'] = trial.suggest_float('hitch_angle_weight', 0.01, 0.5)
+        params['d_thr_factor'] = trial.suggest_float('d_thr_factor', 0.5, 5.0, step=0.5)
+        params['k_switch'] = trial.suggest_float('k_switch', 0.5, 5.0, step=0.5)
+        #params['hitch_angle_weight'] = trial.suggest_float('hitch_angle_weight', 0.01, 0.5)
         
         return params
     
@@ -196,7 +196,8 @@ class DiffusionOptimizer:
             Nsample=self.base_config.Nsample,
             Hsample=self.base_config.Hsample,
             Ndiffuse=self.base_config.Ndiffuse,
-            temp_sample=params['temp_sample'],
+            #temp_sample=params['temp_sample'],
+            temp_sample=self.base_config.temp_sample,
             beta0=self.base_config.beta0,  # Fixed
             betaT=self.base_config.betaT,  # Fixed
             enable_demo=self.base_config.enable_demo,  # Fixed
@@ -210,10 +211,12 @@ class DiffusionOptimizer:
             enable_projection=self.base_config.enable_projection,
             enable_guidance=self.base_config.enable_guidance,
             # Reward thresholds (tunable)
-            reward_threshold=params['reward_threshold'],
+            #reward_threshold=params['reward_threshold'],
+            reward_threshold=self.base_config.reward_threshold,
             ref_reward_threshold=self.base_config.ref_reward_threshold,  # Fixed (no demo)
             max_w_theta=self.base_config.max_w_theta,
-            hitch_angle_weight=params['hitch_angle_weight'],
+            #hitch_angle_weight=params['hitch_angle_weight'],
+            hitch_angle_weight=self.base_config.hitch_angle_weight,
             # Physical parameters (fixed)
             l1=self.base_config.l1,
             l2=self.base_config.l2,
@@ -230,12 +233,15 @@ class DiffusionOptimizer:
             a_max=self.base_config.a_max,
             omega_max=self.base_config.omega_max,
             # Terminal reward (tunable)
-            terminal_reward_threshold=params['terminal_reward_threshold'],
-            terminal_reward_weight=params['terminal_reward_weight'],
+            #terminal_reward_threshold=params['terminal_reward_threshold'],
+            terminal_reward_threshold=self.base_config.terminal_reward_threshold,
+            #terminal_reward_weight=params['terminal_reward_weight'],
+            terminal_reward_weight=self.base_config.terminal_reward_weight,
             # Reward shaping parameters (tunable/fixed mix)
             d_thr_factor=params['d_thr_factor'],
             k_switch=params['k_switch'],
-            steering_weight=params['steering_weight'],
+            #steering_weight=params['steering_weight'],
+            steering_weight=self.base_config.steering_weight,
             preference_penalty_weight=self.base_config.preference_penalty_weight,  # Fixed
             heading_reward_weight=self.base_config.heading_reward_weight,  # Fixed at 0.5
             # Reference weights (fixed - no demo)
@@ -456,7 +462,7 @@ def create_base_config() -> MBDConfig:
     """Create base configuration for optimization"""
     return MBDConfig(
         # Core settings
-        env_name="acc_tt2d",
+        env_name="tt2d",
         case="parking",
         motion_preference=0,  # No motion preference as requested
         enable_demo=False,    # No demonstration as requested
@@ -476,14 +482,14 @@ def create_base_config() -> MBDConfig:
         
         # Default values for parameters that will be optimized
         # (These will be overridden by optimizer)
-        temp_sample=0.01,
-        reward_threshold=25.0,
-        terminal_reward_threshold=1.0,
-        terminal_reward_weight=1.0,
-        steering_weight=0.05,
+        temp_sample=0.00001,
+        reward_threshold=50.0,
+        terminal_reward_threshold=20.0,
+        terminal_reward_weight=5.0,
+        steering_weight=0.01,
         d_thr_factor=1.0,
         k_switch=2.5,
-        hitch_angle_weight=0.05,
+        hitch_angle_weight=0.01,
         
         # Disable rendering for batch optimization
         render=False,
