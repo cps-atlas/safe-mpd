@@ -36,8 +36,8 @@ class TestConfig(MBDConfig):
     # Test metadata (additional fields not in MBDConfig)
     test_name: str = ""
     description: str = ""
-    expected_reward_min: float = -1.0
-    expected_reward_max: float = 1.0
+    expected_distance_min: float = 0.0
+    expected_distance_max: float = 4.0
     timeout_seconds: float = 300
     visualize: bool = False  # If True, enable render and show_animation
     
@@ -57,7 +57,7 @@ class TestConfig(MBDConfig):
     goal_theta2: Optional[float] = None  # Goal trailer orientation
     
     # Validation criteria (test-specific)
-    min_final_distance_to_goal: float = 4.5
+    min_final_distance_to_goal: float = 4.0
     
     def __post_init__(self):
         """Apply visualization settings after initialization"""
@@ -79,8 +79,8 @@ TEST_SCENARIOS = {
         env_name="tt2d",
         enable_demo=False,
         motion_preference=1,
-        expected_reward_min=0.3,
-        expected_reward_max=2.0,
+        expected_distance_min=0.0,
+        expected_distance_max=4.0,
         init_dx=-4.0,
         init_dy=3.0,
         init_theta1=0.0,
@@ -95,8 +95,8 @@ TEST_SCENARIOS = {
         env_name="tt2d",
         enable_demo=False,
         motion_preference=-1,
-        expected_reward_min=0.3,
-        expected_reward_max=2.0,
+        expected_distance_min=0.0,
+        expected_distance_max=4.0,
         init_dx=12.0,
         init_dy=5.0,
         init_theta1=0.0,
@@ -111,10 +111,10 @@ TEST_SCENARIOS = {
         env_name="tt2d",
         enable_demo=False,
         motion_preference=0,
-        expected_reward_min=0.3,
-        expected_reward_max=2.0,
+        expected_distance_min=0.0,
+        expected_distance_max=4.0,
         init_dx=2.0,
-        init_dy=1.0,
+        init_dy=3.0,
         init_theta1=0.0,
         init_theta2=0.0,
         goal_theta1=-jnp.pi/2,
@@ -127,8 +127,8 @@ TEST_SCENARIOS = {
         env_name="tt2d",
         enable_demo=False,
         motion_preference=2,
-        expected_reward_min=0.3,
-        expected_reward_max=2.0,
+        expected_distance_min=0.0,
+        expected_distance_max=4.0,
         init_dx=-5.0,
         init_dy=5.0,
         init_theta1=0.0,
@@ -143,8 +143,8 @@ TEST_SCENARIOS = {
         env_name="tt2d",
         enable_demo=False,
         motion_preference=-2,
-        expected_reward_min=0.3,
-        expected_reward_max=2.0,
+        expected_distance_min=0.0,
+        expected_distance_max=4.0,
         init_dx=-12.0,
         init_dy=1.0,
         init_theta1=jnp.pi,
@@ -162,8 +162,8 @@ ACC_TEST_SCENARIOS = {
         env_name="acc_tt2d",
         enable_demo=False,
         motion_preference=1,
-        expected_reward_min=0.3,
-        expected_reward_max=2.0,
+        expected_distance_min=0.0,
+        expected_distance_max=4.0,
         init_dx=-3.0,
         init_dy=2.0,
         init_theta1=0.0,
@@ -178,8 +178,8 @@ ACC_TEST_SCENARIOS = {
         env_name="acc_tt2d",
         enable_demo=False,
         motion_preference=-1,
-        expected_reward_min=0.3,
-        expected_reward_max=2.0,
+        expected_distance_min=0.0,
+        expected_distance_max=4.0,
         init_dx=13.0,
         init_dy=5.0,
         init_theta1=0.0,
@@ -194,8 +194,8 @@ ACC_TEST_SCENARIOS = {
         env_name="acc_tt2d",
         enable_demo=False,
         motion_preference=0,
-        expected_reward_min=0.3,
-        expected_reward_max=2.0,
+        expected_distance_min=0.0,
+        expected_distance_max=4.0,
         init_dx=2.0,
         init_dy=1.0,
         init_theta1=0.0,
@@ -250,9 +250,9 @@ def _create_demo_scenarios():
         demo_config.test_name = demo_name
         demo_config.description = f"{config.description} (with demo)"
         demo_config.enable_demo = True
-        # Higher expected reward range for demo (typically better performance)
-        demo_config.expected_reward_min = config.expected_reward_min + 0.2
-        demo_config.expected_reward_max = config.expected_reward_max
+        # Distance thresholds for demo (same as base: [0.0, 4.0])
+        demo_config.expected_distance_min = 0.0
+        demo_config.expected_distance_max = config.expected_distance_max
         DEMO_TEST_SCENARIOS[demo_name] = demo_config
     
     # Create demo versions of acceleration scenarios
@@ -262,9 +262,9 @@ def _create_demo_scenarios():
         demo_config.test_name = demo_name
         demo_config.description = f"{config.description} (with demo)"
         demo_config.enable_demo = True
-        # Higher expected reward range for demo (typically better performance)
-        demo_config.expected_reward_min = config.expected_reward_min + 0.2
-        demo_config.expected_reward_max = config.expected_reward_max
+        # Distance thresholds for demo (same as base: [0.0, 4.0])
+        demo_config.expected_distance_min = 0.0
+        demo_config.expected_distance_max = config.expected_distance_max
         ACC_DEMO_TEST_SCENARIOS[demo_name] = demo_config
 
 # Create the demo scenarios
@@ -318,9 +318,9 @@ def create_demo_variant(scenario_name: str, enable_demo: bool = False) -> TestCo
         config.test_name = f"{base_name}_demo"
         config.description = f"{config.description} (with demo)"
         config.enable_demo = True
-        # Higher expected reward range for demo
-        config.expected_reward_min = config.expected_reward_min
-        config.expected_reward_max = config.expected_reward_max
+        # Keep distance thresholds same as base
+        config.expected_distance_min = 0.0
+        config.expected_distance_max = config.expected_distance_max
     
     return config
 

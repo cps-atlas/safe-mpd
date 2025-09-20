@@ -70,7 +70,7 @@ class BaseMBDTest(unittest.TestCase):
             config: TestConfig with test parameters
             
         Returns:
-            Tuple of (reward, actions, states, timing_info)
+            Tuple of (final_distance, actions, states, timing_info)
         """
         logging.debug(f"Running test: {config.test_name}")
         logging.debug(f"Description: {config.description}")
@@ -93,17 +93,39 @@ class BaseMBDTest(unittest.TestCase):
         states_np = np.array(states)
 
         
-        # Validate results
-        self.validate_test_results(config, reward, actions_np, states_np, timing, env)
+        # Compute final distance to goal (minimum of tractor front vs trailer back)
+        final_distance, tractor_distance, trailer_distance = self.compute_final_min_distance(states_np, env)
+
+        # Validate results using distance-based criteria
+        self.validate_test_results(
+            config,
+            final_distance,
+            actions_np,
+            states_np,
+            timing,
+            env,
+            tractor_distance=tractor_distance,
+            trailer_distance=trailer_distance,
+        )
         
         # Save results for reproducibility
-        self.save_test_results(config, reward, actions_np, states_np, timing, env)
+        self.save_test_results(
+            config,
+            final_distance,
+            actions_np,
+            states_np,
+            timing,
+            env,
+            tractor_distance=tractor_distance,
+            trailer_distance=trailer_distance,
+        )
         
-        return reward, actions_np, states_np, timing
+        return final_distance, actions_np, states_np, timing
         
-    def validate_test_results(self, config: TestConfig, reward: float, 
+    def validate_test_results(self, config: TestConfig, final_distance: float, 
                             actions: np.ndarray, states: np.ndarray, 
-                            timing: Dict[str, float], env):
+                            timing: Dict[str, float], env, *,
+                            tractor_distance: float, trailer_distance: float):
         """
         Validate test results against expected criteria.
         
@@ -115,22 +137,22 @@ class BaseMBDTest(unittest.TestCase):
             timing: Timing information dictionary
             env: Environment instance used for the test
         """
-        # Reward bounds check (kept for reference, but success is based on position)
-        self.assertGreaterEqual(reward, config.expected_reward_min, 
-                               f"Reward {reward:.3f} below minimum {config.expected_reward_min}")
-        self.assertLessEqual(reward, config.expected_reward_max,
-                            f"Reward {reward:.3f} above maximum {config.expected_reward_max}")
-        logging.info(f"✓ Reward {reward:.3f} within expected range [{config.expected_reward_min}, {config.expected_reward_max}]")
+        # Distance bounds check (success criteria)
+        self.assertGreaterEqual(final_distance, config.expected_distance_min, 
+                               f"Final distance {final_distance:.3f} below minimum {config.expected_distance_min}")
+        self.assertLessEqual(final_distance, config.expected_distance_max,
+                            f"Final distance {final_distance:.3f} above maximum {config.expected_distance_max}")
+        logging.info(f"✓ Final distance {final_distance:.3f} within expected range [{config.expected_distance_min}, {config.expected_distance_max}]")
         
         # Check constraint violations along trajectory
         hitch_violation_found, collision_found = self.check_trajectory_violations(states, env)
         
         # Position-based success check  
         final_state = states[-1]
-        position_success, tractor_distance, trailer_distance = self.check_position_success(final_state, config, env)
+        position_success, tractor_distance_chk, trailer_distance_chk = self.check_position_success(final_state, config, env)
         
         logging.info(f"✓ Constraint violations - Hitch: {hitch_violation_found}, Collision: {collision_found}")
-        logging.info(f"✓ Position success: {position_success} (tractor: {tractor_distance:.2f}m, trailer: {trailer_distance:.2f}m, limit: {config.min_final_distance_to_goal}m)")
+        logging.info(f"✓ Position success: {position_success} (tractor: {tractor_distance_chk:.2f}m, trailer: {trailer_distance_chk:.2f}m, limit: {config.min_final_distance_to_goal}m)")
         
         # Success is defined as reaching goal position without this being a hard failure
         # We log violations but don't fail the test for now (for analysis purposes)
@@ -195,9 +217,9 @@ class BaseMBDTest(unittest.TestCase):
         # Get tractor position (front center)
         tractor_pos = final_state[:2]
         
-        # Get trailer position using environment function 
+        # Get trailer back position using environment function (align with stat_mbd.py)
         # For acceleration dynamics, only use first 4 elements
-        trailer_pos = np.array(env.get_trailer_position(state_jax[:4]))
+        trailer_pos = np.array(env.get_trailer_back_position(state_jax[:4]))
         
         # Get goal positions (use 4D goal state for compatibility)
         goal_state = env.xg  
@@ -212,9 +234,31 @@ class BaseMBDTest(unittest.TestCase):
         
         return success, tractor_distance, trailer_distance
 
-    def save_test_results(self, config: TestConfig, reward: float, 
+    def compute_final_min_distance(self, states: np.ndarray, env) -> Tuple[float, float, float]:
+        """
+        Compute the final minimum distance to goal between tractor front and trailer back,
+        following the logic in tests/stat_mbd.py (evaluate_trial_result).
+        Returns (final_min_distance, tractor_distance, trailer_distance).
+        """
+        import jax.numpy as jnp
+        final_state = states[-1]
+        final_state_4d = final_state[:4]
+        px, py = final_state_4d[:2]
+        goal_px, goal_py = env.xg[0], env.xg[1]
+
+        tractor_distance = float(np.sqrt((px - goal_px)**2 + (py - goal_py)**2))
+
+        trailer_positions = env.get_trailer_back_position(jnp.array(final_state_4d))
+        trailer_px, trailer_py = float(trailer_positions[0]), float(trailer_positions[1])
+        trailer_distance = float(np.sqrt((trailer_px - goal_px)**2 + (trailer_py - goal_py)**2))
+
+        final_min_distance = min(tractor_distance, trailer_distance)
+        return final_min_distance, tractor_distance, trailer_distance
+
+    def save_test_results(self, config: TestConfig, final_distance: float, 
                          actions: np.ndarray, states: np.ndarray, 
-                         timing: Dict[str, float], env):
+                         timing: Dict[str, float], env, *,
+                         tractor_distance: float, trailer_distance: float):
         """
         Save test results for reproducibility.
         
@@ -226,13 +270,13 @@ class BaseMBDTest(unittest.TestCase):
             timing: Timing information
             env: Environment instance
         """
-        # Check trajectory violations and position success
+        # Check trajectory violations and position success (recompute success for logging)
         hitch_violation_found, collision_found = self.check_trajectory_violations(states, env)
-        position_success, tractor_distance, trailer_distance = self.check_position_success(states[-1], config, env)
+        position_success, tractor_distance_chk, trailer_distance_chk = self.check_position_success(states[-1], config, env)
         
         result_data = {
             'config': asdict(config),
-            'reward': float(reward),
+            'final_distance': float(final_distance),
             'final_state': states[-1].tolist(),
             'timing': timing,
             'timestamp': datetime.now().isoformat(),
@@ -245,12 +289,16 @@ class BaseMBDTest(unittest.TestCase):
                 'position_success': bool(position_success),
                 'tractor_distance_to_goal': float(tractor_distance),
                 'trailer_distance_to_goal': float(trailer_distance),
+                'tractor_distance_to_goal_check': float(tractor_distance_chk),
+                'trailer_distance_to_goal_check': float(trailer_distance_chk),
                 'min_final_distance_to_goal': float(config.min_final_distance_to_goal),
                 # Trajectory info
                 'trajectory_length': len(states),
                 'action_sequence_length': len(actions)            
             }
         }
+
+        
         
         result_file = os.path.join(self.test_results_dir, f"{config.test_name}_result.json")
         with open(result_file, 'w') as f:

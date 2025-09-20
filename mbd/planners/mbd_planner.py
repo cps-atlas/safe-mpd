@@ -59,7 +59,7 @@ class MBDConfig:
     Nsample: int = 20000  # number of samples
     Hsample: int = 50  # horizon
     Ndiffuse: int = 100 # number of diffusion steps
-    temp_sample: float = 0.01  # temperature for sampling
+    temp_sample: float = 0.00001  # temperature for sampling
     beta0: float = 1e-5  # initial beta
     betaT: float = 1e-2  # final beta
     enable_demo: bool = False
@@ -89,17 +89,17 @@ class MBDConfig:
     a_max: float = 2.0  # acceleration limit [m/s²]
     omega_max: float = 1.0  # steering rate limit [rad/s]
     # reward thresholds
-    reward_threshold: float = 25.0  # position error threshold for main reward function
+    reward_threshold: float = 50.0  # position error threshold for main reward function
     ref_reward_threshold: float = 10.0  # position error threshold for demonstration evaluation
     max_w_theta: float = 0.5  # maximum weight for heading reward vs position reward
-    hitch_angle_weight: float = 0.05  # weight for hitch angle (articulation) reward
+    hitch_angle_weight: float = 0.01  # weight for hitch angle (articulation) reward
     # terminal reward
-    terminal_reward_threshold: float = 1.0  # position error threshold for terminal reward
-    terminal_reward_weight: float = 1.0  # weight for terminal reward at final state
+    terminal_reward_threshold: float = 20.0  # position error threshold for terminal reward
+    terminal_reward_weight: float = 5.0  # weight for terminal reward at final state
     # reward shaping parameters
     d_thr_factor: float = 1.0  # multiplier for distance threshold (multiplied by rig length)
     k_switch: float = 2.5  # slope of logistic switch for position/heading reward blending
-    steering_weight: float = 0.05  # weight for trajectory-level steering cost
+    steering_weight: float = 0.01  # weight for trajectory-level steering cost
     preference_penalty_weight: float = 0.5  # penalty weight for movement preference
     heading_reward_weight: float = 0.5  # (should be 0.5 always) weight for heading reward calculation
     # demonstration evaluation weights
@@ -819,7 +819,7 @@ if __name__ == "__main__":
     # Set initial position using geometric parameters relative to parking lot
     # dx: distance from tractor front face to target parking space center
     # dy: distance from tractor to parking lot entrance line
-    env.set_init_pos(dx=2.0, dy=1.0, theta1=0, theta2=0)
+    env.set_init_pos(dx=3.0, dy=5.0, theta1=0, theta2=0)
     if config.num_trailers > 1:
         env.set_init_pos(dx=25.0, dy=15.0, theta1=-jnp.pi/8, theta2=0.0)
     if config.motion_preference == -2:
