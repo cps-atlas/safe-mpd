@@ -190,6 +190,12 @@ env.set_goal_pos($goal_pose$)
 _ = run_diffusion(args=config, env=env)
 ```
 
+<div align="center">
+
+   <img src="https://github.com/user-attachments/assets/2a87867a-0c74-4145-8311-15d51da30add"  height="250px">  <img src="https://github.com/user-attachments/assets/9cb93645-f509-4c64-a6ef-1dcd299e98dc"  height="250px"> 
+
+</div>
+
 
 ### Safety methods and baselines
 
