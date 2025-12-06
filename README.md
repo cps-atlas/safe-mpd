@@ -135,7 +135,55 @@ parking.parking_config['target_spaces'] = [4, 12]  # example pair
 env = mbd.envs.get_env(config.env_name, case="parking", env_config=parking, dt=config.dt, H=config.Hsample)
 ```
 
-The custom environment for general navigation can be set easily with `case="navigation"`. For custom maps, add rectangles with `env.set_rectangle_obs([...], coordinate_mode="left-top"|"center", padding=...)`, and set initial and goal position with `env.set_init_pos(x=x, yy=y, theta1=theta1, theta2=theta2)` and `env.set_goal_pos(x=x, yy=y, theta1=theta1, theta2=theta2)`.
+### Custom navigation environment
+
+For custom navigation scenarios with user-defined obstacles, use `case="navigation"`. A complete minimal example is available at `tests/test_mbd.py`. Run it with:
+
+```bash
+python tests/test_mbd.py
+```
+
+Here's a quick overview of the key steps:
+
+```python
+import jax.numpy as jnp
+import mbd
+from mbd.planners.mbd_planner import MBDConfig, run_diffusion
+from mbd.envs.env import Env
+
+# 1. Create configuration
+config = MBDConfig(
+    $config_info$
+)
+
+# 2. Create base environment
+env_config = Env(case="navigation")
+
+# 3. Create robot environment
+env = mbd.envs.get_env(
+    config.env_name,
+    case=config.case,
+    env_config=env_config
+)
+
+# 4. Add obstacles - rectangles:[x_center, y_center, width, height, rotation]
+#                    circles: [x_center, y_center, radius]
+env.set_rectangle_obs([
+      $obs_info$
+    ], coordinate_mode="center", padding=0.0)
+
+env.set_circle_obs([
+      $obs_info$
+    ], padding=0.0)
+
+# 5. Set initial and goal positions
+env.set_init_pos($init_pose$)
+env.set_goal_pos($goal_pose$)
+
+# 6. Run the planner
+_ = run_diffusion(args=config, env=env)
+```
+
 
 ### Safety methods and baselines
 

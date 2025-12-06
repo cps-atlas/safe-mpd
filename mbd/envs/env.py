@@ -237,6 +237,7 @@ class Env:
             coordinate_mode: "left-top" or "center"
                 - "left-top": x,y represent upper-left corner (CarMaker convention)
                 - "center": x,y represent center (MBD convention)
+            padding: Additional padding around obstacles (default: 0.0)
         """
         converted_obstacles = []
         
@@ -263,6 +264,32 @@ class Env:
         self.obs_rectangles = np.array(converted_obstacles)
         logging.debug(f"Set {len(converted_obstacles)} rectangular obstacles with {coordinate_mode} coordinates")
         return self.obs_rectangles
+
+    def set_circle_obs(self, obstacles, padding=0.0):
+        """
+        Set circular obstacles for navigation scenario
+        
+        Args:
+            obstacles: List of circular obstacles, each as [x, y, radius]
+                - x, y: center coordinates of the circle
+                - radius: radius of the circular obstacle
+            padding: Additional padding around obstacles (default: 0.0)
+        
+        Returns:
+            obs_circles: numpy array of circular obstacles with shape (N, 3)
+        """
+        converted_obstacles = []
+        
+        for obs in obstacles:
+            if len(obs) != 3:
+                raise ValueError(f"Circular obstacle must have 3 elements [x, y, radius], got {len(obs)}")
+            
+            x, y, radius = obs
+            converted_obstacles.append([x, y, radius + padding])
+        
+        self.obs_circles = np.array(converted_obstacles)
+        logging.debug(f"Set {len(converted_obstacles)} circular obstacles")
+        return self.obs_circles
 
     def set_plot_limits(self, x_range, y_range):
         """Set custom plot limits for visualization"""

@@ -256,6 +256,10 @@ class TractorTrailer2d:
         """Set rectangular obstacles"""
         self.obs_rectangles = self.env.set_rectangle_obs(rectangles, coordinate_mode=coordinate_mode, padding=padding)
 
+    def set_circle_obs(self, circles, padding=0.0):
+        """Set circular obstacles"""
+        self.obs_circles = self.env.set_circle_obs(circles, padding=padding)
+
     @partial(jax.jit, static_argnums=(0,))
     def reset(self, rng: jax.Array):
         """Resets the environment to an initial state."""
