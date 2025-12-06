@@ -5,14 +5,14 @@ This repository contains the implementation of the Safe Model Predictive Diffusi
 
 <div align="center">
 
-|  <img src="https://github.com/user-attachments/assets/0560a3cc-ec7b-4d83-8f26-27c61ade3a23"  height="250px"> | <img src="https://github.com/user-attachments/assets/a89e9580-5169-4a0a-9814-98ba844ba87e"  height="250px"> |
+  <img src="https://github.com/user-attachments/assets/0560a3cc-ec7b-4d83-8f26-27c61ade3a23"  height="250px">  <img src="https://github.com/user-attachments/assets/a89e9580-5169-4a0a-9814-98ba844ba87e"  height="250px"> 
 
 <div align="center">
 
 [[Homepage]](https://www.taekyung.me/safe-mpd)
 [[Arxiv]]()
 [[Video]](https://youtu.be/DQBeybU7EYI)
-[[Research Group]1](https://dasc-lab.github.io/)
+[[Research Group1]](https://dasc-lab.github.io/)
 [[Research Group2]](https://amrd.toyota.com/division/trina/)
 
 </div>
@@ -71,6 +71,12 @@ python mbd/planners/mbd_planner.py
 
 This launches the diffusion planner with the default `MBDConfig`, renders a rollout, and saves arrays under `src/safe_mbd/results/{env_name}/`.
 
+<div align="center">
+
+  <img src="https://github.com/user-attachments/assets/f71e5f45-88aa-4cd9-873b-56ee7f40bc6d"  height="250px">  <img src="https://github.com/user-attachments/assets/b841be83-db95-4df0-998f-b653d0f17b03"  height="250px"> 
+
+</div>
+    
 ### Supported dynamics and how to select them
 
 | Environment | Description | n_state | n_control |
@@ -171,8 +177,31 @@ See [tests/test_planners/README.md](`tests/test_planners/README.md`) for details
 
 - **tests/stat_mbd.py**: batch evaluation over diverse initial conditions; reports success rates, errors, and computation time. Optionally visualize heat maps.
   - Run: `python tests/stat_mbd.py`
+  
+|      Benchmark results form `stat_mbd.py`            |
+| :-------------------------------: |
+|  <img src="https://github.com/user-attachments/assets/4e55e8e5-b9a5-41a2-b7d8-13b2e1ec1bd8"  height="350px"> |
+
 - **tests/tune_mbd.py**: `Optuna`-based hyperparameter optimization (GP sampler + MedianPruner), optionally logs to W&B; optimizes success rate using the statistical evaluator.
   - Run: `python tests/tune_mbd.py`
+    
+ |      W&B dashboard example when running `tune_mbd.py`            |
+| :-------------------------------: |
+|  <img src="https://github.com/user-attachments/assets/559f00cb-446a-4d48-9f50-68bd864d2d15"  height="350px"> |
+ 
+## Citing
+
+If you find this repository useful, please consider citing our paper:
+
+```
+@inproceedings{kim2025safempd, 
+    author    = {Kim, Taekyung and Majd, Keyvan and Okamoto, Hideki and Hoxha, Bardh and Panagou, Dimitra and Fainekos, Georgios},
+    title     = {Safe Model Predictive Diffusion with Shielding},
+    booktitle = {arXiv preprint arXiv.25},
+    shorttitle = {Safe MPD},
+    year      = {2025}
+}
+```
 
 ## Reference
-- Original repository: https://github.com/LeCAR-Lab/model-based-diffusion
+This repository was built based on the [implementation of model-based diffusion](https://github.com/LeCAR-Lab/model-based-diffusion). Thanks for the great work of [jc-bao](https://github.com/jc-bao) and [iscoyizj](https://github.com/iscoyizj).
