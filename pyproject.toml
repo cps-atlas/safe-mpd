@@ -3,7 +3,7 @@ requires = ["setuptools>=42.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "mbd"
+name = "safe-mpd"
 version = "0.0.1"
 description = "Model-based diffusion package"
 authors = [

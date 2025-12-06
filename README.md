@@ -1,3 +1,33 @@
+# safe-mpd
+
+This repository contains the implementation of the Safe Model Predictive Diffusion (Safe MPD) algorithm, a training-free diffusion planner for generating provably safe and kinodynamically feasible trajectories. By enforcing feasibility and safety on every sample throughout the denoising process, our method avoids the common pitfalls of post-processing corrections, such as computational intractability and loss of feasibility. Through a parallelization in GPU, our method achieves sub-second planning times even on challenging, non-convex problems. Please see our paper ["Safe Model Predictive Diffusion with Shielding"](https://www.taekyung.me/safe-mpd) for more details.
+
+
+<div align="center">
+
+|  <img src="https://github.com/user-attachments/assets/0560a3cc-ec7b-4d83-8f26-27c61ade3a23"  height="250px"> | <img src="https://github.com/user-attachments/assets/a89e9580-5169-4a0a-9814-98ba844ba87e"  height="250px"> |
+
+<div align="center">
+
+[[Homepage]](https://www.taekyung.me/safe-mpd)
+[[Arxiv]]()
+[[Video]](https://youtu.be/DQBeybU7EYI)
+[[Research Group]1](https://dasc-lab.github.io/)
+[[Research Group2]](https://amrd.toyota.com/division/trina/)
+
+</div>
+</div>
+
+
+## Features
+
+- **Training-free model-based diffusion planner** that generates provably safe and kinodynamically feasible trajectories without requiring offline training or demonstration data.
+- **GPU-accelerated parallelization** using JAX, achieving sub-second planning times even for challenging non-convex problems with thousands of samples.
+- **Shielded rollout mechanism** that enforces safety constraints (collision avoidance and hitch angle limits) at every diffusion step, guaranteeing feasibility throughout the denoising process.
+- **Multiple robot dynamics support**, including kinematic bicycle, single and multi-trailer systems (n-trailer), and dynamic tractor-trailer models with configurable physical parameters.
+- **Parking and navigation scenarios** with configurable obstacle environments, supporting complex maneuver planning tasks like parallel parking and obstacle avoidance.
+
+
 
 ## Installation
 1. Install the docker and nvidia container toolkit (cuda), and check whether the installation is complete using the below command.
