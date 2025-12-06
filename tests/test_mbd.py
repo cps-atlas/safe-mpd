@@ -26,9 +26,9 @@ def main():
         Hsample=50,                # Planning horizon
         Ndiffuse=100,               # Diffusion steps (reduce for faster testing)
         render=True,
-        save_animation=True,
+        save_animation=False,
         show_animation=True,
-        save_denoising_animation=True,
+        save_denoising_animation=False,
     )
     
     # ============================================================
