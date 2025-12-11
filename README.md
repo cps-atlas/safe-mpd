@@ -251,7 +251,7 @@ If you find this repository useful, please consider citing our paper:
 @inproceedings{kim2025safempd, 
     author    = {Kim, Taekyung and Majd, Keyvan and Okamoto, Hideki and Hoxha, Bardh and Panagou, Dimitra and Fainekos, Georgios},
     title     = {Safe Model Predictive Diffusion with Shielding},
-    booktitle = {arXiv preprint arXiv.25},
+    booktitle = {arXiv preprint arXiv:2512.06261},
     shorttitle = {Safe MPD},
     year      = {2025}
 }
